@@ -1,0 +1,112 @@
+# Release: build the app for Linux, Windows and macOS, attest each file,
+# publish a GitHub release, and record the build in the license contract.
+#
+# Start it with a tag: git tag v0.1.0 && git push origin v0.1.0
+# The tag must match the version in app/Cargo.toml.
+#
+# Secret NEAR_RELEASE_KEY: a NEAR key file for a function-call key of the
+# developer account that can call only add_build on the license contract.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  linux-windows:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check the tag
+        run: |
+          V=$(sed -n 's/^version = "\(.*\)"/\1/p' app/Cargo.toml | head -1)
+          test "v$V" = "$GITHUB_REF_NAME" || { echo "Tag $GITHUB_REF_NAME does not match version $V"; exit 1; }
+      - name: Build in Podman (reproducible)
+        run: |
+          scripts/app.sh linux
+          scripts/app.sh windows
+          scripts/package.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-windows
+          path: dist/
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust 1.99.1
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --target aarch64-apple-darwin
+          rustup default 1.99.1
+      - name: Build
+        run: scripts/macos.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos
+          path: |
+            dist/*macos*
+          if-no-files-found: error
+
+  publish:
+    needs: [linux-windows, macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Write SHA256SUMS for all files
+        run: |
+          cd dist
+          rm -f SHA256SUMS
+          sha256sum -- * > /tmp/SHA256SUMS
+          mv /tmp/SHA256SUMS SHA256SUMS
+          cat SHA256SUMS
+      - id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
+        run: |
+          {
+            echo "Official build of BuildDeed Checksum ${GITHUB_REF_NAME#v}, commit ${GITHUB_SHA}."
+            echo
+            echo "- Build provenance: ${ATTESTATION_URL}"
+            echo "- The license contract demo.builddeed.testnet records the SHA-256 of each file."
+            echo "- Rebuild and compare the Linux and Windows files: \`scripts/verify.sh ${GITHUB_REF_NAME#v}\`"
+            echo "- The installers are not code-signed. See the README for the steps on macOS and Windows."
+            echo
+            echo '```'
+            cat dist/SHA256SUMS
+            echo '```'
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --title "BuildDeed Checksum ${GITHUB_REF_NAME#v}" --notes-file notes.md
+      - name: Install the near CLI 0.30.1
+        run: |
+          U=https://github.com/near/near-cli-rs/releases/download/v0.30.1/near-cli-rs-x86_64-unknown-linux-gnu.tar.gz
+          curl -sSL -o /tmp/near.tgz "$U"
+          echo "996e9f390d1cc446d17ea24e39c48f6ff906507f2d1dba96fc41f596a7e5de14  /tmp/near.tgz" | sha256sum -c -
+          tar -xzf /tmp/near.tgz -C /tmp
+          sudo install -m 755 /tmp/near-cli-rs-x86_64-unknown-linux-gnu/near /usr/local/bin/near
+      - name: Record the build in the license contract
+        env:
+          NEAR_RELEASE_KEY: ${{ secrets.NEAR_RELEASE_KEY }}
+          ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
+        run: |
+          umask 077
+          printf '%s' "$NEAR_RELEASE_KEY" > "$RUNNER_TEMP/key.json"
+          scripts/record-build.sh "${GITHUB_REF_NAME#v}" "$GITHUB_SHA" "$ATTESTATION_URL" "$RUNNER_TEMP/key.json"
+          rm -f "$RUNNER_TEMP/key.json"

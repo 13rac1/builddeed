@@ -10,7 +10,7 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
-export SOURCE_DATE_EPOCH=$(git -C "$ROOT" log -1 --format=%ct)
+export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$ROOT" log -1 --format=%ct)}
 
 build() {
   "$HERE/podman-run.sh" bash -c '

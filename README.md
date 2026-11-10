@@ -4,20 +4,174 @@ Shareware is back, but you can resell your license.
 
 BuildDeed sells software licenses as NFTs on NEAR, to pay open source
 developers and contributors. A license gives its owner the verified official
-builds of a program. Anyone can build the program from source.
+build of a program. Anyone can read the code and build it.
 
-- The official build shows a shareware "Please register" screen, and some
-  features are off, until the user proves with a NEAR wallet signature that
-  they own a license.
-- Each official build is reproducible and attested. The contract records the
-  hash of each artifact, so any user can compare a download with the record.
-- An owner can resell a license. Each sale pays the developer and the
-  contributors.
+- Website (testnet demo): https://13rac1.github.io/builddeed/
+- License contract: [`demo.builddeed.testnet`](https://testnet.nearblocks.io/address/demo.builddeed.testnet)
+- Downloads: [GitHub releases](https://github.com/13rac1/builddeed/releases/latest)
+- Built at NEAR HACKATHON 2026, track `nfts` ("NFTs That Do Something").
 
-Status: in development for NEAR HACKATHON (track `nfts`), 2026-11.
+## The problem
+
+Most open source developers are not paid for their work. Closed licenses pay,
+but they lock the code, and nobody can resell a license that they no longer
+use. Shareware in the 1990s had a model between the two: try the program
+free, then register to remove the nag screen and get the full version.
+
+## What BuildDeed does
+
+- **The license is an NFT that pays people.** Each sale, first or resale,
+  splits the payment in the contract among the developer and the
+  contributors. A 3% fee goes to BuildDeed.
+- **The license gives the official build.** The official app shows a
+  shareware "UNREGISTERED" screen, and its registered feature is off, until
+  the user proves with a NEAR wallet signature that their account owns a
+  license. A self-built copy can remove the check; the Business Source
+  License permits personal use, and business use needs a license.
+- **The contract is the record of official builds.** For each release, it
+  stores the commit and the SHA-256 of each file, with a link to the GitHub
+  build attestation. A recorded file cannot be changed or removed.
+- **The Linux and Windows builds are reproducible.** Anyone with Podman can
+  rebuild a release from its recorded commit and get the same bytes.
+- **Licenses can be resold.** The contract has its own market. A resale pays a
+  10% royalty to the developer and contributors. A wallet transfer
+  (`nft_transfer`) is refused, so that the royalty cannot be skipped.
+- **A license covers updates for a period.** The demo license covers the
+  builds released in the 365 days after purchase. The owner keeps those
+  builds after that time, and can renew.
+
+## Try it (judges)
+
+You need a NEAR testnet account with about 10 testnet NEAR. Testnet NEAR is
+free: create an account in a wallet that supports testnet (for example
+[MyNearWallet testnet](https://testnet.mynearwallet.com/) or Meteor), and get
+NEAR from [near-faucet.io](https://near-faucet.io/).
+
+1. Download the app for your system from the
+   [latest release](https://github.com/13rac1/builddeed/releases/latest) and
+   start it. See "The installers are not signed" below.
+   - You see: the "UNREGISTERED COPY" screen. "Continue unregistered" is
+     enabled after 5 seconds.
+2. Drop any file on the app window.
+   - You see: its SHA-256. Drop the installer that you downloaded: the app
+     shows "Official build 0.1.0", the commit and the attestation link.
+3. Drop a folder on the window.
+   - You see: "The folder check needs a license."
+4. Click "Register", then "Buy a license". On the website, connect your
+   wallet and click "Buy for 5 NEAR".
+   - You see: one wallet approval, then "License bought". On "My licenses":
+     license #N, updates until one year from now.
+5. In the app, click "I have a license". The browser opens the sign page.
+   Click "Sign with my wallet".
+   - You see: the wallet signs a message (no transaction, no fee). The browser
+     tab says "Registered to <your account>". The app shows "Registered to
+     <your account>, updates until <date>" and the nag screen is gone.
+6. Drop the same folder twice, with a change between the two.
+   - You see: a report of the changed, added and removed files.
+7. On the website, go to "My licenses" and list the license for 3 NEAR. With
+   a second testnet account, buy it on "Market".
+   - You see: the second account owns the license. The first account got
+     2.61 NEAR; the developer, the contributor and the fee account got the
+     royalty and the fee. Restart the app of the first account: it shows the
+     nag screen again.
+8. Go to "Verify a download" and drop a downloaded file.
+   - You see: "Official build 0.1.0 for <platform>", or "no record" for any
+     other file.
+
+### Rebuild a release and compare (optional)
+
+With Podman (about 6 GB of disk for the build cache):
+
+```sh
+git clone https://github.com/13rac1/builddeed && cd builddeed
+scripts/verify.sh 0.1.0
+```
+
+You see `SAME` for each Linux and Windows file, compared with the SHA-256 in
+the contract.
+
+### The installers are not signed
+
+The hackathon release has no Apple or Windows code signature.
+
+- macOS: open the `.dmg`, drag the app to Applications, then right-click the
+  app and choose "Open". On macOS 15, if it is blocked, go to System
+  Settings, Privacy & Security, and click "Open Anyway".
+- Windows: SmartScreen shows "Windows protected your PC". Click "More info",
+  then "Run anyway". The installer installs for the current user only.
+- Linux: `sudo apt install ./builddeed-checksum_0.1.0_amd64.deb`, or extract
+  the `.tar.gz` and run `builddeed-checksum`.
+
+## How NEAR is used
+
+| Part | NEAR feature |
+| --- | --- |
+| License | NEP-171 NFT with NEP-177 metadata and NEP-181 enumeration. The token metadata holds the update period. |
+| Payment split | The contract pays the payees with transfers in the `buy`, `renew` and `buy_listed` calls. |
+| Resale market and royalty | `list`, `delist`, `buy_listed` in the contract. `nft_transfer` is refused. |
+| App registration | NEP-413 signed message. The app checks the ed25519 signature, then checks on chain that the key is a full-access key of the account and that the account owns a license for its version (`is_entitled`). |
+| Build record | `add_build` (append-only), `find_artifact`, `get_builds`. |
+| Release key | A function-call access key of the developer account that can call only `add_build`. The release workflow holds it, not a full-access key. |
+| Product account | Each product has its own contract on a sub-account, here `demo.builddeed.testnet`. |
+
+## Repository
+
+| Path | What it is |
+| --- | --- |
+| `contract/` | The license contract (Rust, near-sdk 5.30). Unit tests in `src/tests.rs`, a near-sandbox test in `tests/sandbox.rs`. |
+| `app/` | BuildDeed Checksum, the demo app (Rust, egui/eframe 0.32). |
+| `site/` | The website (Vite, NEAR Connect). |
+| `build/` | The Podman build image (Rust 1.99.1, pinned by digest; Debian packages from a fixed snapshot) and the NSIS installer script. |
+| `scripts/` | Build, package, record and verify scripts. All Rust builds run in Podman. |
+| `.github/workflows/` | Release (build, attest, publish, record on chain) and Pages. |
+
+### Build and test
+
+You need Podman.
+
+```sh
+scripts/contract.sh test     # contract: 17 unit tests and the sandbox test
+scripts/app.sh test          # app: unit tests
+scripts/app.sh linux         # app/target/x86_64-unknown-linux-gnu/release/builddeed-checksum
+scripts/app.sh windows       # app/target/x86_64-pc-windows-gnu/release/builddeed-checksum.exe
+scripts/package.sh           # dist/: .deb, .tar.gz, NSIS installer, SHA256SUMS
+```
+
+The website: `cd site && npm ci && npm run build` (Node 24).
+
+### Deployed contract
+
+The contract on `demo.builddeed.testnet` has the code hash
+`4b4e42010ab7b83a631a5631ca2f167f037e5bf67b55c9cd76addcc4cb232d32`.
+`scripts/contract.sh build` prints the same SHA-256.
+
+## Trust model and limits
+
+- The developer holds a full-access key of the contract account and can
+  deploy new code. A future version locks the contract or gives upgrades to a
+  DAO.
+- A stolen release key can record a false build. It cannot change or remove
+  a recorded build.
+- The registration check is in open source code. It works because most users
+  and every business prefer to pay than to rebuild, as with shareware.
+- macOS builds are not reproducible. They have a provenance attestation only.
+- This demo runs on NEAR testnet. Testnet NEAR has no value.
+
+## Hackathon disclosures
+
+- Hackathon window: the project started on 2026-11-10. There is no code from
+  before the hackathon.
+- AI-written code: an AI coding agent (Claude Code) wrote most of the code,
+  the tests and the documents with the team, who directed the design and
+  reviewed the work.
+- Libraries: near-sdk, near-contract-standards, near-workspaces (contract);
+  eframe/egui, ed25519-dalek, sha2, ureq, serde, base64, bs58, getrandom,
+  hex (app); @hot-labs/near-connect, Vite (site). The full lists are in
+  `contract/Cargo.lock`, `app/Cargo.lock` and `site/package-lock.json`.
+- No template was used.
 
 ## License
 
 Business Source License 1.1. See [LICENSE](LICENSE). Personal use is free.
-Business use needs a BuildDeed license. Each version changes to Apache 2.0
-four years after its release.
+Business use needs a BuildDeed license. Each version changes to the Apache
+License 2.0 four years after its release.
