@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BuildDeed</title>
+  <meta name="description" content="Software licenses as NFTs on NEAR. The license gives you the verified official build. You can resell it, and each sale pays the developers and contributors.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b6e6e'/%3E%3Ctext x='16' y='21' font-family='monospace' font-size='13' font-weight='700' fill='white' text-anchor='middle'%3EBD%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div>
+      <h1>Shareware is back, but you can resell your license.</h1>
+      <p class="lead">BuildDeed sells software licenses as NFTs on NEAR. A license gives you the verified official build of an open program. When you no longer need it, you sell it, and the developers and contributors get a share of that sale too.</p>
+      <p>
+        <a class="btn" href="buy.html">Buy a license</a>
+        <a class="btn ghost" id="download" href="#">Download the demo app</a>
+      </p>
+    </div>
+    <div class="dialog" aria-label="The demo app's registration screen">
+      <div class="title">BuildDeed Checksum</div>
+      <div class="body">
+        <div class="unreg">UNREGISTERED COPY</div>
+        <p>BuildDeed Checksum 0.1.0 is shareware. A license pays the developers and the contributors of this program, turns on the folder check, and removes this screen.</p>
+        <div class="row">
+          <span class="fake-btn">Buy a license</span>
+          <span class="fake-btn">I have a license</span>
+          <span class="fake-btn">Continue unregistered (5)</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <h2>The problem</h2>
+  <p>Open source developers give away their work, and most of them are not paid for it. Closed licenses pay, but they lock the code, and you cannot sell a license that you no longer use.</p>
+  <p>BuildDeed keeps the code open. Anyone can read it and build it. The license buys the official build: the binary that the developers built, attested and recorded on chain, with updates for a year. That is what shareware sold, and it worked.</p>
+
+  <h2>How it works</h2>
+  <ol class="steps">
+    <li><strong>Download the official app.</strong> It runs, and it shows the shareware screen. The folder check is off.</li>
+    <li><strong>Buy a license.</strong> One wallet approval. The license contract mints an NFT to your account and pays the developers, the contributors and a 3% BuildDeed fee.</li>
+    <li><strong>Register the app.</strong> The app opens this site, your wallet signs a message (no transaction, no fee), and the app checks on chain that your account owns a license. The screen goes away.</li>
+    <li><strong>Resell it.</strong> List your license on the market. The buyer pays, a 10% royalty goes to the developers and contributors, and you get the rest. Your copy of the app goes back to unregistered.</li>
+    <li><strong>Verify any download.</strong> Each official file has a SHA-256 on chain, with a link to its build attestation. Drop a file on the verify page to check it.</li>
+  </ol>
+
+  <h2>What NEAR does here</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>The license is an NFT that pays people</h3>
+      <p>Every sale, first or resale, splits the payment in the contract among the developer and the contributors. Nobody holds the money in between.</p>
+    </div>
+    <div class="card">
+      <h3>The contract is the record of official builds</h3>
+      <p>The developer records the commit and the hash of each release file. A recorded file cannot be changed or removed, so a download can be checked years later.</p>
+    </div>
+    <div class="card">
+      <h3>The app checks the chain, not a license server</h3>
+      <p>The app asks a public NEAR RPC node whether your account owns a license for its version. No company has to keep a server running for your software to work.</p>
+    </div>
+  </div>
+
+  <h2>Live from the contract</h2>
+  <div class="grid">
+    <div class="card" id="terms"><p class="muted">Loading the sale terms...</p></div>
+    <div class="card" id="builds"><p class="muted">Loading the official builds...</p></div>
+  </div>
+
+  <h2>For developers</h2>
+  <p>You keep the code open and choose the terms: price, update period, royalty, and who gets paid. Your release pipeline builds in a container, attests each file and records its hash with a key that can call only one contract method. Anyone can rebuild the Linux and Windows files and get the same hash.</p>
+  <p class="muted">This is a testnet demo built for NEAR HACKATHON 2026. Testnet NEAR is free: get some from the <a href="https://near-faucet.io/">faucet</a>.</p>
+</main>
+<script type="module" src="./src/pages/index.js"></script>
+</body>
+</html>

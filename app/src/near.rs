@@ -147,9 +147,12 @@ pub fn verify_nep413(m: &SignedMessage) -> Result<(), String> {
         .map_err(|_| "The public key is not base58")?
         .try_into()
         .map_err(|_| "The public key must be 32 bytes")?;
-    let sig_bytes: [u8; 64] = B64
-        .decode(m.signature_b64)
-        .map_err(|_| "The signature is not base64")?
+    // NEP-413 says base64. Some wallets send "ed25519:<base58>".
+    let sig_vec = match m.signature_b64.strip_prefix("ed25519:") {
+        Some(b58) => bs58::decode(b58).into_vec().map_err(|_| "The signature is not base58")?,
+        None => B64.decode(m.signature_b64).map_err(|_| "The signature is not base64")?,
+    };
+    let sig_bytes: [u8; 64] = sig_vec
         .try_into()
         .map_err(|_| "The signature must be 64 bytes")?;
     let key = VerifyingKey::from_bytes(&key_bytes).map_err(|_| "The public key is not valid")?;
@@ -179,6 +182,9 @@ mod tests {
             public_key: &pk,
             signature_b64: &sig,
         };
+        assert!(verify_nep413(&m).is_ok());
+        let sig58 = format!("ed25519:{}", bs58::encode(sk.sign(&hash).to_bytes()).into_string());
+        m.signature_b64 = &sig58;
         assert!(verify_nep413(&m).is_ok());
         m.message = "hellO";
         assert!(verify_nep413(&m).is_err());
