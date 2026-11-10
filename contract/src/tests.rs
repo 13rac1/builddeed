@@ -37,6 +37,7 @@ fn config() -> Config {
                 bps: 3000,
             },
         ],
+        max_devices: 3,
     }
 }
 
@@ -693,6 +694,8 @@ fn config_checks() {
             "Give 1 to 16 payees",
         ),
         (|c| c.payees[0].bps = 6999, "add up to 10000"),
+        (|c| c.max_devices = 0, "Give 1 to 16 computers"),
+        (|c| c.max_devices = 17, "Give 1 to 16 computers"),
     ];
     call("dev.near", yocto(0), 1_000);
     for (change, want) in cases {
@@ -732,4 +735,149 @@ fn set_prices_by_other_account_fails() {
     let mut c = setup();
     call("alice.near", yocto(0), 5_000);
     c.set_prices(near(1), near(1));
+}
+
+// ----- Computer seats -----
+
+fn dev(c: char) -> String {
+    c.to_string().repeat(64)
+}
+
+/// Registers a computer from alice's account with enough deposit for storage.
+fn add(c: &mut Contract, token: &str, device: char) -> LicenseView {
+    call("alice.near", NearToken::from_millinear(10), 20_000);
+    c.add_device(token.into(), dev(device))
+}
+
+#[test]
+fn owner_registers_up_to_three_computers() {
+    let mut c = with_license();
+    add(&mut c, "1", 'a');
+    add(&mut c, "1", 'b');
+    let l = add(&mut c, "1", 'c');
+    assert_eq!(l.devices, vec![dev('a'), dev('b'), dev('c')]);
+    let msg = panic_text(|| {
+        add(&mut c, "1", 'd');
+    });
+    assert!(msg.contains("already has 3 computers"), "{msg}");
+}
+
+#[test]
+fn device_license_reports_the_license_and_the_version() {
+    let mut c = setup();
+    call("dev.near", yocto(0), 5_000);
+    c.add_build("0.1.0".into(), commit('a'), vec![artifact('a')]);
+    call("alice.near", near(5), 10_000);
+    c.buy();
+    add(&mut c, "1", 'a');
+    let d = c.device_license(dev('a'), "0.1.0".into()).expect("seat");
+    assert_eq!(
+        (d.token_id.as_str(), d.owner_id.as_str()),
+        ("1", "alice.near")
+    );
+    assert!(d.covers_version);
+    let d = c.device_license(dev('a'), "9.9.9".into()).expect("seat");
+    assert!(!d.covers_version, "unknown version");
+    assert!(
+        c.device_license(dev('b'), "0.1.0".into()).is_none(),
+        "no seat"
+    );
+}
+
+#[test]
+fn remove_frees_a_seat() {
+    let mut c = with_license();
+    for d in ['a', 'b', 'c'] {
+        add(&mut c, "1", d);
+    }
+    call("alice.near", yocto(YOCTO), 20_000);
+    let l = c.remove_device("1".into(), dev('b'));
+    assert_eq!(l.devices, vec![dev('a'), dev('c')]);
+    assert!(c.device_license(dev('b'), "x".into()).is_none());
+    add(&mut c, "1", 'd');
+}
+
+#[test]
+fn resale_clears_the_seats() {
+    let mut c = with_license();
+    add(&mut c, "1", 'a');
+    call("alice.near", yocto(YOCTO), 20_000);
+    c.list("1".into(), near(3));
+    call("bob.near", near(3), 30_000);
+    let l = c.buy_listed("1".into(), near(3));
+    assert!(l.devices.is_empty());
+    assert!(
+        c.device_license(dev('a'), "x".into()).is_none(),
+        "seller's computer"
+    );
+}
+
+/// A change to a good add_device call, and the panic text that it must give.
+type SeatCase = (&'static str, &'static str, String, NearToken, &'static str);
+
+#[test]
+fn seat_rules() {
+    let ten = NearToken::from_millinear(10);
+    let cases: Vec<SeatCase> = vec![
+        (
+            "bob.near",
+            "1",
+            dev('a'),
+            ten,
+            "Only the owner can register",
+        ),
+        ("alice.near", "1", "xyz".into(), ten, "64 lowercase hex"),
+        ("alice.near", "1", dev('a'), yocto(1), "Attach at least"),
+        (
+            "alice.near",
+            "9",
+            dev('a'),
+            ten,
+            "No license has this token id",
+        ),
+    ];
+    // Every case fails before it changes the state, so one contract serves
+    // all. (The mocked blockchain keeps storage between setups in one test.)
+    let mut c = with_license();
+    for (who, token, device, deposit, want) in cases {
+        call(who, deposit, 20_000);
+        let msg = panic_text(|| {
+            c.add_device(token.into(), device);
+        });
+        assert!(msg.contains(want), "{want}: {msg}");
+    }
+}
+
+#[test]
+fn a_computer_has_one_seat() {
+    let mut c = setup();
+    for _ in 0..2 {
+        call("alice.near", near(5), 10_000);
+        c.buy();
+    }
+    add(&mut c, "1", 'a');
+    let msg = panic_text(|| {
+        add(&mut c, "1", 'a');
+    });
+    assert!(msg.contains("already registered on this license"), "{msg}");
+    let msg = panic_text(|| {
+        add(&mut c, "2", 'a');
+    });
+    assert!(msg.contains("registered on another license"), "{msg}");
+}
+
+#[test]
+fn remove_device_needs_one_yocto_and_a_known_computer() {
+    let mut c = with_license();
+    add(&mut c, "1", 'a');
+    call("alice.near", yocto(0), 20_000);
+    let msg = panic_text(|| {
+        c.remove_device("1".into(), dev('a'));
+    });
+    assert!(msg.contains("exactly 1 yoctoNEAR"), "{msg}");
+    call("alice.near", yocto(YOCTO), 20_000);
+    let msg = panic_text(|| {
+        c.remove_device("1".into(), dev('b'));
+    });
+    assert!(msg.contains("not on this license"), "{msg}");
 }

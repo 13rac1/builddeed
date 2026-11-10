@@ -78,7 +78,8 @@ async fn sale_resale_and_entitlement_on_sandbox() -> anyhow::Result<()> {
                 "payees": [
                     { "account_id": dev.id(), "bps": 7000 },
                     { "account_id": contrib.id(), "bps": 3000 }
-                ]
+                ],
+                "max_devices": 3
             },
             "symbol": "BDCK",
             "icon": null
@@ -139,6 +140,30 @@ async fn sale_resale_and_entitlement_on_sandbox() -> anyhow::Result<()> {
         .await?
         .json()?;
     assert!(entitled);
+
+    // Alice registers a computer. She pays its storage: the contract's free
+    // balance does not go down.
+    let device = "d".repeat(64);
+    let (free_a, _) = free_balance(contract.as_account()).await?;
+    alice
+        .call(contract.id(), "add_device")
+        .args_json(json!({ "token_id": "1", "device_id": device }))
+        .deposit(NearToken::from_millinear(10))
+        .transact()
+        .await?
+        .into_result()?;
+    let (free_b, _) = free_balance(contract.as_account()).await?;
+    assert!(
+        free_b >= free_a,
+        "free balance went down: {free_a} -> {free_b}"
+    );
+    let seat: Value = contract
+        .view("device_license")
+        .args_json(json!({ "device_id": device, "version": "0.1.0" }))
+        .await?
+        .json()?;
+    assert_eq!(seat["owner_id"], alice.id().as_str());
+    assert_eq!(seat["covers_version"], true);
 
     // A wallet transfer is refused with the market message.
     let refused = alice
@@ -213,5 +238,137 @@ async fn sale_resale_and_entitlement_on_sandbox() -> anyhow::Result<()> {
         .json()?;
     assert!(!alice_now, "the seller is not entitled after the resale");
     assert!(bob_now, "the buyer is entitled after the resale");
+    let seat: Value = contract
+        .view("device_license")
+        .args_json(json!({ "device_id": device, "version": "0.1.0" }))
+        .await?
+        .json()?;
+    assert!(seat.is_null(), "the resale cleared the seller's computer");
+    Ok(())
+}
+
+/// Upgrade from the code that is deployed on testnet (fixture, SHA-256
+/// 4b4e4201...) to this code, with the deploy and `migrate` in one
+/// transaction. Licenses, builds and the token counter must stay.
+#[tokio::test]
+async fn migrate_from_v1() -> anyhow::Result<()> {
+    let worker = near_workspaces::sandbox().await?;
+    let v1 = std::fs::read(format!(
+        "{}/tests/fixtures/builddeed_license_v1.wasm",
+        env!("CARGO_MANIFEST_DIR")
+    ))?;
+    let v2 = std::fs::read(wasm_path())?;
+    let root = worker.root_account()?;
+    let dev = new_account(&root, "dev").await?;
+    let fee = new_account(&root, "fee").await?;
+    let alice = new_account(&root, "alice").await?;
+    let contract: Contract = root
+        .create_subaccount("demo")
+        .initial_balance(NearToken::from_near(10))
+        .transact()
+        .await?
+        .into_result()?
+        .deploy(&v1)
+        .await?
+        .into_result()?;
+    contract
+        .call("new")
+        .args_json(json!({
+            "config": {
+                "product": "BuildDeed Checksum",
+                "developer": dev.id(),
+                "price": (5 * NEAR).to_string(),
+                "renewal_price": (2 * NEAR).to_string(),
+                "update_period_days": 365,
+                "royalty_bps": 1000,
+                "fee_account": fee.id(),
+                "fee_bps": 300,
+                "payees": [{ "account_id": dev.id(), "bps": 10000 }]
+            },
+            "symbol": "BDCK",
+            "icon": null
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+    dev.call(contract.id(), "add_build")
+        .args_json(json!({
+            "version": "0.1.0",
+            "commit": "a".repeat(40),
+            "artifacts": [{ "platform": "linux-x86_64", "file": "app.deb",
+                            "sha256": "b".repeat(64), "attestation_url": null }]
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+    alice
+        .call(contract.id(), "buy")
+        .deposit(NearToken::from_near(5))
+        .max_gas()
+        .transact()
+        .await?
+        .into_result()?;
+
+    // Deploy and migrate in one transaction.
+    contract
+        .as_account()
+        .batch(contract.id())
+        .deploy(&v2)
+        .call(
+            near_workspaces::operations::Function::new("migrate")
+                .args_json(json!({ "max_devices": 3 }))
+                .max_gas(),
+        )
+        .transact()
+        .await?
+        .into_result()?;
+
+    let config: Value = contract.view("get_config").await?.json()?;
+    assert_eq!(config["max_devices"], 3);
+    assert_eq!(config["product"], "BuildDeed Checksum");
+    let license: Value = contract
+        .view("get_license")
+        .args_json(json!({ "token_id": "1" }))
+        .await?
+        .json()?;
+    assert_eq!(license["owner_id"], alice.id().as_str(), "license 1 kept");
+    let build: Value = contract
+        .view("get_build")
+        .args_json(json!({ "version": "0.1.0" }))
+        .await?
+        .json()?;
+    assert_eq!(build["commit"], "a".repeat(40), "build record kept");
+
+    // The token counter is kept: the next license is #2.
+    let next: Value = alice
+        .call(contract.id(), "buy")
+        .deposit(NearToken::from_near(5))
+        .max_gas()
+        .transact()
+        .await?
+        .into_result()?
+        .json()?;
+    assert_eq!(next["token_id"], "2");
+
+    // Seats work after the migration.
+    alice
+        .call(contract.id(), "add_device")
+        .args_json(json!({ "token_id": "1", "device_id": "e".repeat(64) }))
+        .deposit(NearToken::from_millinear(10))
+        .transact()
+        .await?
+        .into_result()?;
+
+    // Only the contract account can call migrate.
+    let again = alice
+        .call(contract.id(), "migrate")
+        .args_json(json!({ "max_devices": 3 }))
+        .transact()
+        .await?;
+    let err = format!(
+        "{:?}",
+        again.into_result().expect_err("migrate must be private")
+    );
+    assert!(err.contains("private"), "{err}");
     Ok(())
 }

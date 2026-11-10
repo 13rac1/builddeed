@@ -7,6 +7,10 @@
 //! The contract also keeps the record of the official builds: for each version,
 //! the commit and the SHA-256 of each artifact. The record is append-only.
 //!
+//! A license has up to `max_devices` computer seats. The owner registers a
+//! computer with `add_device`; the app finds its license with
+//! `device_license`. A resale clears the seats.
+//!
 //! A license changes owner only through the contract's market (`list` and
 //! `buy_listed`), so that each resale pays the royalty on the listed price.
 //! `nft_transfer` and `nft_transfer_call` are refused. A resale price is at
@@ -40,6 +44,7 @@ const MAX_NAME: usize = 64;
 const MAX_FILE: usize = 255;
 const MAX_PAGE: u32 = 100;
 const MAX_PAYEES: usize = 16;
+const MAX_DEVICES: u8 = 16;
 
 // The order of the variants is part of the stored state. Do not change it.
 #[derive(BorshStorageKey)]
@@ -53,6 +58,8 @@ enum StorageKey {
     Builds,
     ArtifactIndex,
     Listings,
+    Devices,
+    TokenDevices,
 }
 
 /// A share of a sale.
@@ -85,6 +92,8 @@ pub struct Config {
     pub fee_bps: u16,
     /// The developer and the contributors.
     pub payees: Vec<Payee>,
+    /// The number of computers that one license can register.
+    pub max_devices: u8,
 }
 
 /// The state of one license.
@@ -105,6 +114,19 @@ pub struct LicenseView {
     pub updates_until_ms: u64,
     /// The resale price, if the license is on the market.
     pub listed_price: Option<NearToken>,
+    /// The registered computers (device ids).
+    pub devices: Vec<String>,
+}
+
+/// The result of `device_license`.
+#[near(serializers = [json])]
+#[derive(Clone, Debug)]
+pub struct DeviceLicense {
+    pub token_id: TokenId,
+    pub owner_id: AccountId,
+    pub updates_until_ms: u64,
+    /// True if the license covers the version that the app asked about.
+    pub covers_version: bool,
 }
 
 /// One file of a release.
@@ -144,7 +166,7 @@ pub struct ArtifactMatch {
 }
 
 // The fields and their order are the stored state. Do not change them
-// without a state migration.
+// without a state migration (see `migrate`).
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct Contract {
@@ -157,6 +179,10 @@ pub struct Contract {
     /// sha256 -> version
     artifact_index: LookupMap<String, String>,
     listings: IterableMap<TokenId, NearToken>,
+    /// device id -> token id
+    devices: LookupMap<String, TokenId>,
+    /// token id -> device ids
+    token_devices: LookupMap<TokenId, Vec<String>>,
 }
 
 #[near]
@@ -188,6 +214,43 @@ impl Contract {
             builds: IterableMap::new(StorageKey::Builds),
             artifact_index: LookupMap::new(StorageKey::ArtifactIndex),
             listings: IterableMap::new(StorageKey::Listings),
+            devices: LookupMap::new(StorageKey::Devices),
+            token_devices: LookupMap::new(StorageKey::TokenDevices),
+        }
+    }
+
+    /// Upgrades the state of the first version (no computer seats) after a
+    /// deploy of this code. Only the contract account can call it. The
+    /// deploy and this call go in one transaction.
+    #[private]
+    #[init(ignore_state)]
+    pub fn migrate(max_devices: u8) -> Self {
+        let old: v1::Contract = env::state_read().expect("no state to migrate");
+        let c = old.config;
+        let config = Config {
+            product: c.product,
+            developer: c.developer,
+            price: c.price,
+            renewal_price: c.renewal_price,
+            update_period_days: c.update_period_days,
+            royalty_bps: c.royalty_bps,
+            fee_account: c.fee_account,
+            fee_bps: c.fee_bps,
+            payees: c.payees,
+            max_devices,
+        };
+        check_config(&config);
+        Self {
+            tokens: old.tokens,
+            metadata: old.metadata,
+            config,
+            next_token_id: old.next_token_id,
+            licenses: old.licenses,
+            builds: old.builds,
+            artifact_index: old.artifact_index,
+            listings: old.listings,
+            devices: LookupMap::new(StorageKey::Devices),
+            token_devices: LookupMap::new(StorageKey::TokenDevices),
         }
     }
 
@@ -327,6 +390,8 @@ impl Contract {
         let excess = take_payment(price);
 
         self.listings.remove(&token_id);
+        // The seller's computers lose the license; the buyer starts with no seats.
+        self.clear_devices(&token_id);
         self.tokens
             .internal_transfer(&seller, &buyer, &token_id, None, Some("resale".to_string()));
 
@@ -340,6 +405,96 @@ impl Contract {
         ));
         pay(&buyer, excess);
         self.license_view(&token_id).expect("the license exists")
+    }
+
+    // ----- Computer seats -----
+
+    /// Registers a computer on a license. Only the owner can do it, up to
+    /// `max_devices` computers. `device_id` is the 64-hex id that the app
+    /// shows. Attach NEAR for the storage (0.01 NEAR is enough); the contract
+    /// returns the excess.
+    #[payable]
+    pub fn add_device(&mut self, token_id: TokenId, device_id: String) -> LicenseView {
+        let caller = env::predecessor_account_id();
+        require!(
+            self.owner_of(&token_id) == caller,
+            "Only the owner can register a computer"
+        );
+        require!(
+            is_hex(&device_id, 64),
+            "The device id must be 64 lowercase hex characters"
+        );
+        if let Some(other) = self.devices.get(&device_id) {
+            if *other == token_id {
+                env::panic_str("This computer is already registered on this license");
+            }
+            env::panic_str("This computer is registered on another license. Remove it there first");
+        }
+        let mut list = self
+            .token_devices
+            .get(&token_id)
+            .cloned()
+            .unwrap_or_default();
+        if list.len() >= usize::from(self.config.max_devices) {
+            env::panic_str(&format!(
+                "This license already has {} computers. Remove one first",
+                self.config.max_devices
+            ));
+        }
+        let storage_before = env::storage_usage();
+        list.push(device_id.clone());
+        self.token_devices.insert(token_id.clone(), list);
+        self.devices.insert(device_id, token_id.clone());
+        self.token_devices.flush();
+        self.devices.flush();
+        let cost = storage_cost_since(storage_before);
+        let excess = take_payment(cost);
+        pay(&caller, excess);
+        self.license_view(&token_id).expect("the license exists")
+    }
+
+    /// Removes a computer from a license, so that its seat is free again.
+    /// Attach exactly 1 yoctoNEAR.
+    #[payable]
+    pub fn remove_device(&mut self, token_id: TokenId, device_id: String) -> LicenseView {
+        assert_one_yocto();
+        require!(
+            self.owner_of(&token_id) == env::predecessor_account_id(),
+            "Only the owner can remove a computer"
+        );
+        let mut list = self
+            .token_devices
+            .get(&token_id)
+            .cloned()
+            .unwrap_or_default();
+        let before = list.len();
+        list.retain(|d| *d != device_id);
+        require!(list.len() < before, "This computer is not on this license");
+        self.devices.remove(&device_id);
+        if list.is_empty() {
+            self.token_devices.remove(&token_id);
+        } else {
+            self.token_devices.insert(token_id.clone(), list);
+        }
+        self.license_view(&token_id).expect("the license exists")
+    }
+
+    /// The license that a computer is registered on, and whether it covers
+    /// `version`. None if the computer has no seat.
+    pub fn device_license(&self, device_id: String, version: String) -> Option<DeviceLicense> {
+        let token_id = self.devices.get(&device_id)?.clone();
+        let owner_id = self.tokens.owner_by_id.get(&token_id)?;
+        let l = self.licenses.get(&token_id)?;
+        let covers_version = self
+            .builds
+            .get(&version)
+            .is_some_and(|b| l.updates_until_ms >= b.released_at_ms);
+        Some(DeviceLicense {
+            token_id,
+            owner_id,
+            updates_until_ms: l.updates_until_ms,
+            covers_version,
+        })
     }
 
     // ----- Developer -----
@@ -518,7 +673,20 @@ impl Contract {
             purchased_at_ms: l.purchased_at_ms,
             updates_until_ms: l.updates_until_ms,
             listed_price: self.listings.get(token_id).copied(),
+            devices: self
+                .token_devices
+                .get(token_id)
+                .cloned()
+                .unwrap_or_default(),
         })
+    }
+
+    fn clear_devices(&mut self, token_id: &TokenId) {
+        if let Some(list) = self.token_devices.remove(token_id) {
+            for d in list {
+                self.devices.remove(&d);
+            }
+        }
     }
 
     /// The token metadata holds a copy of the license period for wallets.
@@ -711,6 +879,10 @@ fn check_config(c: &Config) {
         !c.payees.is_empty() && c.payees.len() <= MAX_PAYEES,
         "Give 1 to 16 payees"
     );
+    require!(
+        c.max_devices >= 1 && c.max_devices <= MAX_DEVICES,
+        "Give 1 to 16 computers for each license"
+    );
     let total: u32 = c.payees.iter().map(|p| u32::from(p.bps)).sum();
     require!(
         total == BPS_TOTAL,
@@ -767,6 +939,36 @@ fn storage_cost_since(before: u64) -> NearToken {
 fn pay(to: &AccountId, amount: NearToken) {
     if !amount.is_zero() {
         Promise::new(to.clone()).transfer(amount).detach();
+    }
+}
+
+/// The stored state of the first version, for `migrate`.
+mod v1 {
+    use super::*;
+
+    #[near(serializers = [borsh])]
+    pub struct Config {
+        pub product: String,
+        pub developer: AccountId,
+        pub price: NearToken,
+        pub renewal_price: NearToken,
+        pub update_period_days: u32,
+        pub royalty_bps: u16,
+        pub fee_account: AccountId,
+        pub fee_bps: u16,
+        pub payees: Vec<Payee>,
+    }
+
+    #[near(serializers = [borsh])]
+    pub struct Contract {
+        pub tokens: NonFungibleToken,
+        pub metadata: LazyOption<NFTContractMetadata>,
+        pub config: Config,
+        pub next_token_id: u64,
+        pub licenses: LookupMap<TokenId, License>,
+        pub builds: IterableMap<String, Build>,
+        pub artifact_index: LookupMap<String, String>,
+        pub listings: IterableMap<TokenId, NearToken>,
     }
 }
 
