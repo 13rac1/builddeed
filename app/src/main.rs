@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use store::Registration;
+use store::{Check, Registration};
 
 const PRODUCT: &str = "BuildDeed Checksum";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -34,14 +34,17 @@ const EXPLORER: &str = "https://testnet.nearblocks.io/address";
 const REG_FILE: &str = "registration.json";
 const NAG_WAIT: Duration = Duration::from_secs(5);
 
+/// The result of a dropped file.
+struct FileCheck {
+    path: PathBuf,
+    sha256: Result<String, String>,
+    record: Result<Option<ArtifactMatch>, String>,
+}
+
 enum Msg {
-    Check(Result<Option<Registration>, String>),
+    Check(Check),
     SignIn(Result<Registration, String>),
-    File {
-        path: PathBuf,
-        sha256: Result<String, String>,
-        record: Result<Option<ArtifactMatch>, String>,
-    },
+    File(FileCheck),
     Folder(Result<(String, PathBuf), String>),
     SelfCheck(String),
 }
@@ -63,7 +66,7 @@ struct App {
     nag_since: Instant,
     signing_in: bool,
     message: String,
-    file: Option<(PathBuf, Result<String, String>, Result<Option<ArtifactMatch>, String>)>,
+    file: Option<FileCheck>,
     folder: Option<Result<(String, PathBuf), String>>,
     busy: bool,
     self_check: String,
@@ -73,7 +76,10 @@ impl App {
     fn new(cc: &eframe::CreationContext) -> Self {
         cc.egui_ctx.set_zoom_factor(1.1);
         let (tx, rx) = channel();
-        let near = Arc::new(Near { rpc_url: RPC_URL.into(), contract: CONTRACT.into() });
+        let near = Arc::new(Near {
+            rpc_url: RPC_URL.into(),
+            contract: CONTRACT.into(),
+        });
         let reg: Option<Registration> = store::load(REG_FILE);
         let mut app = Self {
             near,
@@ -104,21 +110,8 @@ impl App {
         let near = self.near.clone();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let result = license_for(&near, &r.account_id, &r.public_key).map(|found| {
-                found.map(|mut fresh| {
-                    fresh.checked_at_ms = store::now_ms();
-                    fresh
-                })
-            });
-            let result = match result {
-                Err(e) if store::now_ms().saturating_sub(r.checked_at_ms) < store::OFFLINE_GRACE_MS => {
-                    // No network: keep the stored result for the grace period.
-                    eprintln!("license check failed, using the stored result: {e}");
-                    Ok(Some(r))
-                }
-                other => other,
-            };
-            let _ = tx.send(Msg::Check(result));
+            let fresh = license_for(&near, &r.account_id, &r.public_key);
+            let _ = tx.send(Msg::Check(store::resolve(fresh, &r, store::now_ms())));
             ctx.request_repaint();
         });
     }
@@ -133,7 +126,7 @@ impl App {
                     Ok(Some(m)) => format!(
                         "Official build {} (commit {}).\nSHA-256 {sha}",
                         m.version,
-                        &m.commit[..12]
+                        m.commit.get(..12).unwrap_or(&m.commit)
                     ),
                     Ok(None) => format!(
                         "Not an official build: the license contract has no record of this program.\nSHA-256 {sha}"
@@ -156,7 +149,9 @@ impl App {
         };
         open_url(&pending.sign_url);
         self.signing_in = true;
-        self.message = "Sign the message in your wallet. The browser sends the result back to this app.".into();
+        self.message =
+            "Sign the message in your wallet. The browser sends the result back to this app."
+                .into();
         let near = self.near.clone();
         let tx = self.tx.clone();
         let ctx = ctx.clone();
@@ -173,6 +168,10 @@ impl App {
     }
 
     fn on_drop(&mut self, path: PathBuf, ctx: &egui::Context) {
+        if self.busy {
+            self.message = "Wait for the current check to finish.".into();
+            return;
+        }
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         if path.is_dir() {
@@ -192,10 +191,14 @@ impl App {
             std::thread::spawn(move || {
                 let sha256 = folder::sha256_file(&path).map_err(|e| e.to_string());
                 let record = match &sha256 {
-                    Ok(s) => near.find_artifact(s),
+                    Ok(s) => near.find_artifact(s).map_err(String::from),
                     Err(_) => Ok(None),
                 };
-                let _ = tx.send(Msg::File { path, sha256, record });
+                let _ = tx.send(Msg::File(FileCheck {
+                    path,
+                    sha256,
+                    record,
+                }));
                 ctx.request_repaint();
             });
         }
@@ -204,37 +207,44 @@ impl App {
     fn handle_messages(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
-                Msg::Check(Ok(Some(r))) => {
-                    let _ = store::save(REG_FILE, &r);
-                    self.reg = Some(r);
-                    self.state = State::Registered;
-                    self.nag_open = false;
+                Msg::Check(Check::Fresh(Some(r))) => {
+                    if let Err(e) = store::save(REG_FILE, &r) {
+                        self.message = e;
+                    }
+                    self.registered(r);
                 }
-                Msg::Check(Ok(None)) => {
+                Msg::Check(Check::Grace(r)) => {
+                    // Not saved again: the grace time counts from the last
+                    // check that reached the network.
+                    self.message =
+                        "No network: using the license check from the last start.".into();
+                    self.registered(r);
+                }
+                Msg::Check(Check::Fresh(None)) => {
                     store::remove(REG_FILE);
                     self.reg = None;
                     self.state = State::Unregistered;
                     self.message = "The stored license is no longer valid for this version.".into();
                 }
-                Msg::Check(Err(e)) => {
+                Msg::Check(Check::Failed(e)) => {
                     self.state = State::Unregistered;
                     self.message = format!("Cannot check the license: {e}");
                 }
                 Msg::SignIn(Ok(r)) => {
                     self.signing_in = false;
-                    let _ = store::save(REG_FILE, &r);
-                    self.message = format!("Registered to {}. Thank you!", r.account_id);
-                    self.reg = Some(r);
-                    self.state = State::Registered;
-                    self.nag_open = false;
+                    self.message = match store::save(REG_FILE, &r) {
+                        Ok(_) => format!("Registered to {}. Thank you!", r.account_id),
+                        Err(e) => format!("Registered to {} for this run only: {e}", r.account_id),
+                    };
+                    self.registered(r);
                 }
                 Msg::SignIn(Err(e)) => {
                     self.signing_in = false;
                     self.message = e;
                 }
-                Msg::File { path, sha256, record } => {
+                Msg::File(f) => {
                     self.busy = false;
-                    self.file = Some((path, sha256, record));
+                    self.file = Some(f);
                 }
                 Msg::Folder(r) => {
                     self.busy = false;
@@ -243,6 +253,12 @@ impl App {
                 Msg::SelfCheck(t) => self.self_check = t,
             }
         }
+    }
+
+    fn registered(&mut self, r: Registration) {
+        self.reg = Some(r);
+        self.state = State::Registered;
+        self.nag_open = false;
     }
 
     fn nag(&mut self, ctx: &egui::Context) {
@@ -289,43 +305,59 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_messages();
 
-        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
+        let dropped: Vec<PathBuf> = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .filter_map(|f| f.path.clone())
+                .collect()
+        });
         if let Some(p) = dropped.into_iter().next() {
             self.on_drop(p, ctx);
         }
 
         egui::TopBottomPanel::top("status").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                match (&self.state, &self.reg) {
-                    (State::Registered, Some(r)) => {
-                        ui.label(RichText::new(format!(
+            ui.horizontal(|ui| match (&self.state, &self.reg) {
+                (State::Registered, Some(r)) => {
+                    ui.label(
+                        RichText::new(format!(
                             "Registered to {}, updates until {}",
                             r.account_id,
                             date(r.updates_until_ms)
-                        )).color(Color32::from_rgb(30, 140, 60)).strong());
-                    }
-                    (State::Checking, _) => {
-                        ui.label("Checking the license...");
-                    }
-                    _ => {
-                        ui.label(RichText::new("UNREGISTERED").color(Color32::from_rgb(200, 40, 40)).strong());
-                        if ui.small_button("Register").clicked() {
-                            self.nag_open = true;
-                            self.nag_since = Instant::now() - NAG_WAIT;
-                        }
+                        ))
+                        .color(Color32::from_rgb(30, 140, 60))
+                        .strong(),
+                    );
+                }
+                (State::Checking, _) => {
+                    ui.label("Checking the license...");
+                }
+                _ => {
+                    ui.label(
+                        RichText::new("UNREGISTERED")
+                            .color(Color32::from_rgb(200, 40, 40))
+                            .strong(),
+                    );
+                    if ui.small_button("Register").clicked() {
+                        self.nag_open = true;
+                        self.nag_since = Instant::now() - NAG_WAIT;
                     }
                 }
             });
         });
 
         egui::TopBottomPanel::bottom("about").show(ctx, |ui| {
-            ui.small(format!("{PRODUCT} {VERSION}. License contract {CONTRACT} on NEAR testnet."));
+            ui.small(format!(
+                "{PRODUCT} {VERSION}. License contract {CONTRACT} on NEAR testnet."
+            ));
             ui.small(&self.self_check);
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading(PRODUCT);
-            ui.label("Drop a file on this window to see its SHA-256 and its official build record.");
+            ui.label(
+                "Drop a file on this window to see its SHA-256 and its official build record.",
+            );
             ui.label(if self.state == State::Registered {
                 "Drop a folder to check it against its last check."
             } else {
@@ -334,7 +366,12 @@ impl eframe::App for App {
             if self.busy {
                 ui.spinner();
             }
-            if let Some((path, sha, record)) = &self.file {
+            if let Some(FileCheck {
+                path,
+                sha256: sha,
+                record,
+            }) = &self.file
+            {
                 ui.separator();
                 ui.label(RichText::new(path.display().to_string()).strong());
                 match sha {
@@ -352,10 +389,16 @@ impl eframe::App for App {
                 }
                 match record {
                     Ok(Some(m)) => {
-                        ui.label(RichText::new(format!(
-                            "Official build {} for {}, commit {}, released {}.",
-                            m.version, m.artifact.platform, m.commit, date(m.released_at_ms)
-                        )).color(Color32::from_rgb(30, 140, 60)));
+                        ui.label(
+                            RichText::new(format!(
+                                "Official build {} for {}, commit {}, released {}.",
+                                m.version,
+                                m.artifact.platform,
+                                m.commit,
+                                date(m.released_at_ms)
+                            ))
+                            .color(Color32::from_rgb(30, 140, 60)),
+                        );
                         if let Some(url) = &m.artifact.attestation_url {
                             ui.hyperlink_to("Build attestation", url);
                         }
@@ -374,9 +417,11 @@ impl eframe::App for App {
                 ui.separator();
                 match result {
                     Ok((report, saved)) => {
-                        egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-                            ui.monospace(report);
-                        });
+                        egui::ScrollArea::vertical()
+                            .max_height(260.0)
+                            .show(ui, |ui| {
+                                ui.monospace(report);
+                            });
                         ui.horizontal(|ui| {
                             ui.label(format!("Report saved to {}", saved.display()));
                             if ui.small_button("Copy report").clicked() {
@@ -409,7 +454,11 @@ impl eframe::App for App {
 
 /// Finds a license of `account_id` that covers this version, and checks that
 /// `public_key` is still a full-access key of the account.
-fn license_for(near: &Near, account_id: &str, public_key: &str) -> Result<Option<Registration>, String> {
+fn license_for(
+    near: &Near,
+    account_id: &str,
+    public_key: &str,
+) -> Result<Option<Registration>, String> {
     if !near.is_full_access_key(account_id, public_key)? {
         return Ok(None);
     }
@@ -447,7 +496,7 @@ fn check_folder(path: &std::path::Path) -> Result<(String, PathBuf), String> {
         ),
     };
     store::save(&name, &new)?;
-    let saved = store::save("last-report.txt", &report)?;
+    let saved = store::save_text("last-report.txt", &report)?;
     Ok((report, saved))
 }
 
@@ -470,7 +519,9 @@ fn date(ms: u64) -> String {
 fn open_url(url: &str) {
     let result = if cfg!(target_os = "windows") {
         // Not "cmd /C start": cmd reads each "&" in the URL as a command separator.
-        std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).spawn()
+        std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", url])
+            .spawn()
     } else if cfg!(target_os = "macos") {
         std::process::Command::new("open").arg(url).spawn()
     } else {

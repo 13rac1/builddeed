@@ -1,6 +1,6 @@
 [package]
 name = "builddeed-checksum"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "BUSL-1.1"
 repository = "https://github.com/13rac1/builddeed"
@@ -25,3 +25,6 @@ opt-level = 3
 debug = false
 strip = true
 panic = "abort"
+
+[lints.rust]
+unsafe_code = "forbid"

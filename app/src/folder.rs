@@ -46,7 +46,11 @@ pub fn snapshot(folder: &Path, now_ms: u64) -> std::io::Result<Snapshot> {
             // Symbolic links are not followed.
         }
     }
-    Ok(Snapshot { folder: folder.to_path_buf(), taken_at_ms: now_ms, files })
+    Ok(Snapshot {
+        folder: folder.to_path_buf(),
+        taken_at_ms: now_ms,
+        files,
+    })
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -84,7 +88,11 @@ pub fn report(new: &Snapshot, c: &Changes) -> String {
         c.added.len(),
         c.removed.len()
     );
-    for (title, list) in [("Changed", &c.changed), ("Added", &c.added), ("Removed", &c.removed)] {
+    for (title, list) in [
+        ("Changed", &c.changed),
+        ("Added", &c.added),
+        ("Removed", &c.removed),
+    ] {
         if !list.is_empty() {
             s.push_str(&format!("\n{title}:\n"));
             for p in list {
