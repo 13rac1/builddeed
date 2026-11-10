@@ -1,0 +1,27 @@
+# BuildDeed build image. Every Rust build runs in this image, so that the
+# toolchain is the same on each machine and each build.
+#
+# The base image is rust 1.99.1 on Debian 13 (trixie), pinned by digest.
+# The Debian packages come from snapshot.debian.org at a fixed date, so that
+# a rebuild of this image installs the same package versions.
+FROM docker.io/library/rust@sha256:7eab7ce19273ce785e0ca7578bdf7bc1fcbae621775a8197379a04c9f6e03cd5
+
+ARG DEBIAN_SNAPSHOT=20261101T000000Z
+
+RUN rm -f /etc/apt/sources.list.d/debian.sources \
+ && printf 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/%s trixie main\n' "$DEBIAN_SNAPSHOT" \
+      > /etc/apt/sources.list \
+ && apt-get -o Acquire::Retries=3 update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates pkg-config libssl-dev clang \
+      gcc-mingw-w64-x86-64 nsis \
+      dpkg-dev fakeroot file \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN rustup target add wasm32-unknown-unknown x86_64-pc-windows-gnu \
+ && rustup component add clippy rustfmt
+
+ENV CARGO_HOME=/cache/cargo \
+    CARGO_TERM_COLOR=never
+
+WORKDIR /src

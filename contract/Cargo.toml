@@ -1,0 +1,30 @@
+[package]
+name = "builddeed-license"
+version = "0.1.0"
+edition = "2021"
+license = "BUSL-1.1"
+repository = "https://github.com/13rac1/builddeed"
+description = "BuildDeed license contract: software licenses as NEP-171 NFTs, a resale market with royalty, and a record of official builds"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = { version = "5.29", default-features = false }
+near-contract-standards = "5.29"
+
+[dev-dependencies]
+near-sdk = { version = "5.29", features = ["unit-testing"] }
+near-workspaces = "0.24"
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+anyhow = "1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+panic = "abort"
+overflow-checks = true
+opt-level = "z"
+debug = false
+strip = true
