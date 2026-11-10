@@ -6,8 +6,8 @@ use std::path::PathBuf;
 /// The last successful license check.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Registration {
+    /// The owner of the license.
     pub account_id: String,
-    pub public_key: String,
     pub token_id: String,
     pub updates_until_ms: u64,
     /// The time of the last check that reached the network.
@@ -112,7 +112,6 @@ mod tests {
     fn reg(checked_at_ms: u64) -> Registration {
         Registration {
             account_id: "alice.testnet".into(),
-            public_key: "ed25519:x".into(),
             token_id: "1".into(),
             updates_until_ms: 9_999_999_999_999,
             checked_at_ms,

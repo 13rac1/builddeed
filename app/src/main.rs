@@ -6,20 +6,25 @@
 //! - Drop a folder: the folder check compares every file with the last check
 //!   of that folder. This feature needs a license.
 //!
+//! Registration: a license has three computer seats. The app shows this
+//! computer's id; the owner registers it on the website (one wallet
+//! transaction); the app then finds its seat in the license contract.
+//!
 //! The license check is in the source code, and anyone may build the app
 //! without it (see LICENSE). The official build is the one that the license
 //! contract records.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod device;
 mod folder;
 mod near;
-mod signin;
 mod store;
 
 use eframe::egui::{self, Color32, RichText};
 use near::{ArtifactMatch, Near};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -33,6 +38,13 @@ const SITE_URL: &str = "https://13rac1.github.io/builddeed";
 const EXPLORER: &str = "https://testnet.nearblocks.io/address";
 const REG_FILE: &str = "registration.json";
 const NAG_WAIT: Duration = Duration::from_secs(5);
+/// While the user registers on the website, the app asks the contract this
+/// often, for at most REGISTER_WAIT.
+#[cfg(not(test))]
+const POLL_EVERY: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const POLL_EVERY: Duration = Duration::from_millis(50);
+const REGISTER_WAIT: Duration = Duration::from_secs(600);
 
 /// The result of a dropped file.
 struct FileCheck {
@@ -43,7 +55,7 @@ struct FileCheck {
 
 enum Msg {
     Check(Check),
-    SignIn(Result<Registration, String>),
+    Registered(Result<Registration, String>),
     File(FileCheck),
     Folder(Result<(String, PathBuf), String>),
     SelfCheck(String),
@@ -64,7 +76,10 @@ struct App {
     reg: Option<Registration>,
     nag_open: bool,
     nag_since: Instant,
-    signing_in: bool,
+    /// This computer's id, or why the app cannot read it.
+    device: Result<String, String>,
+    /// Set while the app waits for the registration; store true to stop.
+    waiting: Option<Arc<AtomicBool>>,
     message: String,
     file: Option<FileCheck>,
     folder: Option<Result<(String, PathBuf), String>>,
@@ -80,38 +95,50 @@ impl App {
             rpc_url: RPC_URL.into(),
             contract: CONTRACT.into(),
         });
-        let reg: Option<Registration> = store::load(REG_FILE);
+        let stored: Option<Registration> = store::load(REG_FILE);
         let mut app = Self {
             near,
             tx,
             rx,
             state: State::Checking,
-            reg: reg.clone(),
+            reg: None,
             nag_open: true,
             nag_since: Instant::now(),
-            signing_in: false,
+            device: device::device_id(CONTRACT),
+            waiting: None,
             message: String::new(),
             file: None,
             folder: None,
             busy: false,
             self_check: "Checking this program...".into(),
         };
-        match reg {
-            Some(r) => app.spawn_recheck(r, cc.egui_ctx.clone()),
-            None => app.state = State::Unregistered,
+        match app.device.clone() {
+            Ok(id) => app.spawn_check(id, stored, cc.egui_ctx.clone()),
+            Err(e) => {
+                app.state = State::Unregistered;
+                app.message = e;
+            }
         }
         app.spawn_self_check(cc.egui_ctx.clone());
         app
     }
 
-    /// Checks a stored registration again: a license that was sold stops
-    /// working at the next start.
-    fn spawn_recheck(&self, r: Registration, ctx: egui::Context) {
+    /// Asks the contract for this computer's seat at each start, so that a
+    /// license that was sold, or a removed seat, stops working. With no
+    /// network, the stored check from an earlier start can count.
+    fn spawn_check(&self, device: String, stored: Option<Registration>, ctx: egui::Context) {
         let near = self.near.clone();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let fresh = license_for(&near, &r.account_id, &r.public_key);
-            let _ = tx.send(Msg::Check(store::resolve(fresh, &r, store::now_ms())));
+            let fresh = license_for(&near, &device);
+            let check = match &stored {
+                Some(r) => store::resolve(fresh, r, store::now_ms()),
+                None => match fresh {
+                    Ok(r) => Check::Fresh(r),
+                    Err(e) => Check::Failed(e),
+                },
+            };
+            let _ = tx.send(Msg::Check(check));
             ctx.request_repaint();
         });
     }
@@ -139,32 +166,36 @@ impl App {
         });
     }
 
-    fn start_sign_in(&mut self, ctx: &egui::Context) {
-        let pending = match signin::start(SITE_URL, PRODUCT) {
-            Ok(p) => p,
+    /// Opens the website's register page for this computer, then asks the
+    /// contract every few seconds until the computer has a seat.
+    fn start_register(&mut self, ctx: &egui::Context) {
+        let device = match &self.device {
+            Ok(d) => d.clone(),
             Err(e) => {
-                self.message = e;
+                self.message = e.clone();
                 return;
             }
         };
-        open_url(&pending.sign_url);
-        self.signing_in = true;
-        self.message =
-            "Sign the message in your wallet. The browser sends the result back to this app."
-                .into();
+        open_url(&register_url(&device));
+        self.message = "Register this computer on the website. This app sees the registration a few seconds after the transaction.".into();
+        let stop = Arc::new(AtomicBool::new(false));
+        self.waiting = Some(stop.clone());
         let near = self.near.clone();
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let result = pending.finish(&near).and_then(|s| {
-                license_for(&near, &s.account_id, &s.public_key)?.ok_or(format!(
-                    "{} has no license that covers version {VERSION}. Buy one, then try again.",
-                    s.account_id
-                ))
-            });
-            let _ = tx.send(Msg::SignIn(result));
-            ctx.request_repaint();
+            let result = wait_for_seat(&near, &device, &stop);
+            if !stop.load(Ordering::Relaxed) {
+                let _ = tx.send(Msg::Registered(result));
+                ctx.request_repaint();
+            }
         });
+    }
+
+    fn stop_waiting(&mut self) {
+        if let Some(stop) = self.waiting.take() {
+            stop.store(true, Ordering::Relaxed);
+        }
     }
 
     fn on_drop(&mut self, path: PathBuf, ctx: &egui::Context) {
@@ -230,16 +261,16 @@ impl App {
                     self.state = State::Unregistered;
                     self.message = format!("Cannot check the license: {e}");
                 }
-                Msg::SignIn(Ok(r)) => {
-                    self.signing_in = false;
+                Msg::Registered(Ok(r)) => {
+                    self.waiting = None;
                     self.message = match store::save(REG_FILE, &r) {
                         Ok(_) => format!("Registered to {}. Thank you!", r.account_id),
                         Err(e) => format!("Registered to {} for this run only: {e}", r.account_id),
                     };
                     self.registered(r);
                 }
-                Msg::SignIn(Err(e)) => {
-                    self.signing_in = false;
+                Msg::Registered(Err(e)) => {
+                    self.waiting = None;
                     self.message = e;
                 }
                 Msg::File(f) => {
@@ -275,11 +306,13 @@ impl App {
                 if ui.button("Buy a license").clicked() {
                     open_url(&format!("{SITE_URL}/buy.html"));
                 }
-                if ui
-                    .add_enabled(!self.signing_in, egui::Button::new("I have a license"))
-                    .clicked()
-                {
-                    self.start_sign_in(ctx);
+                if self.waiting.is_some() {
+                    if ui.button("Stop waiting").clicked() {
+                        self.stop_waiting();
+                        self.message.clear();
+                    }
+                } else if ui.button("I have a license").clicked() {
+                    self.start_register(ctx);
                 }
                 let label = if wait_left.is_zero() {
                     "Continue unregistered".to_string()
@@ -293,6 +326,12 @@ impl App {
             if !self.message.is_empty() {
                 ui.add_space(8.0);
                 ui.label(RichText::new(&self.message).italics());
+            }
+            if self.waiting.is_some() {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label("Waiting for the registration...");
+                });
             }
         });
         if !wait_left.is_zero() {
@@ -351,6 +390,9 @@ impl eframe::App for App {
                 "{PRODUCT} {VERSION}. License contract {CONTRACT} on NEAR testnet."
             ));
             ui.small(&self.self_check);
+            if let Ok(d) = &self.device {
+                ui.small(format!("This computer: {}", short(d)));
+            }
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -452,30 +494,60 @@ impl eframe::App for App {
     }
 }
 
-/// Finds a license of `account_id` that covers this version, and checks that
-/// `public_key` is still a full-access key of the account.
-fn license_for(
-    near: &Near,
-    account_id: &str,
-    public_key: &str,
-) -> Result<Option<Registration>, String> {
-    if !near.is_full_access_key(account_id, public_key)? {
-        return Ok(None);
+/// The seat of this computer, if it is on a license that covers this
+/// version.
+fn license_for(near: &Near, device: &str) -> Result<Option<Registration>, String> {
+    Ok(near
+        .device_license(device, VERSION)?
+        .filter(|d| d.covers_version)
+        .map(|d| Registration {
+            account_id: d.owner_id,
+            token_id: d.token_id,
+            updates_until_ms: d.updates_until_ms,
+            checked_at_ms: store::now_ms(),
+        }))
+}
+
+/// Asks the contract for this computer's seat until it has one, `stop` is
+/// set, or REGISTER_WAIT ends. Network errors are tried again.
+fn wait_for_seat(near: &Near, device: &str, stop: &AtomicBool) -> Result<Registration, String> {
+    let deadline = Instant::now() + REGISTER_WAIT;
+    while Instant::now() < deadline && !stop.load(Ordering::Relaxed) {
+        match near.device_license(device, VERSION) {
+            Ok(Some(d)) if d.covers_version => {
+                return Ok(Registration {
+                    account_id: d.owner_id,
+                    token_id: d.token_id,
+                    updates_until_ms: d.updates_until_ms,
+                    checked_at_ms: store::now_ms(),
+                })
+            }
+            Ok(Some(d)) => {
+                return Err(format!(
+                    "This computer is on license #{} of {}, but its update period ended before version {VERSION}. Renew the license on the website.",
+                    d.token_id, d.owner_id
+                ))
+            }
+            Ok(None) | Err(_) => std::thread::sleep(POLL_EVERY),
+        }
     }
-    if !near.is_entitled(account_id, VERSION)? {
-        return Ok(None);
+    Err("The app stopped waiting. Click \"I have a license\" to try again.".into())
+}
+
+/// The website page that registers this computer.
+fn register_url(device: &str) -> String {
+    format!("{SITE_URL}/register.html#device={device}&version={VERSION}")
+}
+
+/// The first and last characters of a device id, as the website shows them.
+fn short(device: &str) -> String {
+    match (
+        device.get(..8),
+        device.get(device.len().saturating_sub(4)..),
+    ) {
+        (Some(a), Some(b)) if device.len() > 12 => format!("{a}...{b}"),
+        _ => device.to_string(),
     }
-    let best = near
-        .licenses_for_owner(account_id)?
-        .into_iter()
-        .max_by_key(|l| l.updates_until_ms);
-    Ok(best.map(|l| Registration {
-        account_id: account_id.to_string(),
-        public_key: public_key.to_string(),
-        token_id: l.token_id,
-        updates_until_ms: l.updates_until_ms,
-        checked_at_ms: store::now_ms(),
-    }))
 }
 
 fn check_folder(path: &std::path::Path) -> Result<(String, PathBuf), String> {
@@ -545,6 +617,73 @@ fn main() -> eframe::Result {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use near::fake_rpc;
+    use serde_json::json;
+
+    fn near(url: String) -> Near {
+        Near {
+            rpc_url: url,
+            contract: CONTRACT.into(),
+        }
+    }
+
+    #[test]
+    fn register_url_has_device_and_version() {
+        let d = "a".repeat(64);
+        assert_eq!(
+            register_url(&d),
+            format!("{SITE_URL}/register.html#device={d}&version={VERSION}")
+        );
+        assert_eq!(short(&d), "aaaaaaaa...aaaa");
+        assert_eq!(short("abc"), "abc");
+    }
+
+    #[test]
+    fn a_seat_that_covers_the_version_registers() {
+        let seat = json!({ "token_id": "4", "owner_id": "bob.testnet",
+                           "updates_until_ms": 99u64, "covers_version": true });
+        let url = fake_rpc::serve(vec![
+            fake_rpc::view(seat.clone()),
+            fake_rpc::view(json!(null)),
+        ]);
+        let n = near(url);
+        let r = license_for(&n, "d").unwrap().expect("registered");
+        assert_eq!(
+            (r.account_id.as_str(), r.token_id.as_str()),
+            ("bob.testnet", "4")
+        );
+        assert_eq!(license_for(&n, "d"), Ok(None), "no seat");
+    }
+
+    #[test]
+    fn a_seat_on_an_ended_license_does_not_register() {
+        let seat = json!({ "token_id": "4", "owner_id": "bob.testnet",
+                           "updates_until_ms": 99u64, "covers_version": false });
+        let url = fake_rpc::serve(vec![fake_rpc::view(seat.clone()), fake_rpc::view(seat)]);
+        let n = near(url);
+        assert_eq!(license_for(&n, "d"), Ok(None));
+        let e = wait_for_seat(&n, "d", &AtomicBool::new(false)).unwrap_err();
+        assert!(e.contains("Renew the license"), "{e}");
+    }
+
+    #[test]
+    fn waiting_ends_when_the_seat_appears() {
+        let seat = json!({ "token_id": "1", "owner_id": "a.testnet",
+                           "updates_until_ms": 99u64, "covers_version": true });
+        // First no seat, then the seat.
+        let url = fake_rpc::serve(vec![fake_rpc::view(json!(null)), fake_rpc::view(seat)]);
+        let r = wait_for_seat(&near(url), "d", &AtomicBool::new(false)).unwrap();
+        assert_eq!(r.token_id, "1");
+    }
+
+    #[test]
+    fn waiting_stops_when_asked() {
+        let stop = AtomicBool::new(true);
+        let e = wait_for_seat(&near("http://127.0.0.1:9".into()), "d", &stop).unwrap_err();
+        assert!(e.contains("stopped waiting"), "{e}");
+    }
+
     #[test]
     fn date_formats_utc_days() {
         assert_eq!(super::date(0), "1970-01-01");

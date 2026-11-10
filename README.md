@@ -25,9 +25,15 @@ free, then register to remove the nag screen and get the full version.
   contributors. A 3% fee goes to BuildDeed.
 - **The license gives the official build.** The official app shows a
   shareware "UNREGISTERED" screen, and its registered feature is off, until
-  the user proves with a NEAR wallet signature that their account owns a
-  license. A self-built copy can remove the check; the Business Source
-  License permits personal use, and business use needs a license.
+  the computer has a seat on a license.
+- **A license has three computer seats.** The owner registers a computer with
+  one wallet transaction, removes it to free the seat, and a resale clears
+  all seats. The app finds its seat in the contract by a computer id that it
+  computes from the operating system's machine id, so the id cannot be
+  copied to another computer.
+- **Self-builds are allowed.** A self-built copy can remove the check; the
+  Business Source License permits personal use, and business use needs a
+  license.
 - **The contract is the record of official builds.** For each release, it
   stores the commit and the SHA-256 of each file, with a link to the GitHub
   build attestation. A recorded file cannot be changed or removed.
@@ -64,18 +70,19 @@ NEAR from [near-faucet.io](https://near-faucet.io/).
    wallet and click "Buy for 5 NEAR".
    - You see: one wallet approval, then "License bought". On "My licenses":
      license #N, updates until one year from now.
-5. In the app, click "I have a license". The browser opens the sign page.
-   Click "Sign with my wallet".
-   - You see: the wallet signs a message (no transaction, no fee). The browser
-     tab says "Registered to <your account>". The app shows "Registered to
-     <your account>, updates until <date>" and the nag screen is gone.
+5. In the app, click "I have a license". The browser opens the register page
+   with the computer id. Click "Register this computer" on your license.
+   - You see: one wallet approval (about 0.01 NEAR for storage). Within a few
+     seconds the app shows "Registered to <your account>, updates until
+     <date>" and the nag screen is gone. "My licenses" shows 1 of 3 seats.
 6. Drop the same folder twice, with a change between the two.
    - You see: a report of the changed, added and removed files.
 7. On the website, go to "My licenses" and list the license for 3 NEAR. With
    a second testnet account, buy it on "Market".
    - You see: the second account owns the license. The first account got
      2.61 NEAR; the developer, the contributor and the fee account got the
-     royalty and the fee. Restart the app of the first account: it shows the
+     royalty and the fee. The resale cleared the seats: restart the app of
+     the first account, and it shows the
      nag screen again. (With no network, the app keeps the last check for up
      to 14 days.)
 8. Go to "Verify a download" and drop a downloaded file.
@@ -114,7 +121,7 @@ The hackathon release has no Apple or Windows code signature.
 | License | NEP-171 NFT with NEP-177 metadata and NEP-181 enumeration. The token metadata holds the update period. |
 | Payment split | The contract pays the payees with transfers in the `buy`, `renew` and `buy_listed` calls. |
 | Resale market and royalty | `list`, `delist` (1 yoctoNEAR, so that only a full-access key can call them), `buy_listed` with the price that the buyer saw. `nft_transfer` is refused. |
-| App registration | NEP-413 signed message. The app checks the ed25519 signature, then checks on chain that the key is a full-access key of the account and that the account owns a license for its version (`is_entitled`). |
+| Computer seats | `add_device` (owner only, storage paid by the owner), `remove_device`, `device_license(device_id, version)`. Three seats for each license; a resale clears them. The app reads its seat with a view call, so registration needs no license server and no callback to the app. |
 | Build record | `add_build` (append-only), `find_artifact`, `get_builds`. |
 | Release key | A function-call access key of the developer account that can call only `add_build`. The release workflow holds it, not a full-access key. |
 | Product account | Each product has its own contract on a sub-account, here `demo.builddeed.testnet`. |
@@ -161,8 +168,9 @@ The contract on `demo.builddeed.testnet` has the code hash
   a version only in the 24 hours after the first record of that version.
   `verify.sh` refuses a version whose tag does not point to the recorded
   commit.
-- A license is for one person. The signed sign-in works on any computer of
-  that person, so one license can register more than one computer.
+- The computer id comes from the machine id of the operating system. A user
+  who controls the computer can change the app to report another id; that is
+  the same as building the app without the check.
 - With no network, the app uses its last license check for up to 14 days.
   The stored check cannot be proven offline.
 - The registration check is in public source code. It works because most users

@@ -63,9 +63,26 @@ function card(l) {
       "div",
       {},
       h("p", {}, "Price in NEAR: ", price, " ", list),
-      h("p", { class: "muted" }, `The lowest price is ${formatNear(config.renewal_price)} NEAR. When it sells, ${royalty}% goes to the developers and contributors, ${fee}% to BuildDeed, and ${100 - royalty - fee}% to you.`)
+      h("p", { class: "muted" }, `The lowest price is ${formatNear(config.renewal_price)} NEAR. A sale removes your computers. When it sells, ${royalty}% goes to the developers and contributors, ${fee}% to BuildDeed, and ${100 - royalty - fee}% to you.`)
     );
   }
+
+  const seats = h(
+    "div",
+    {},
+    h("p", {}, `Computers: ${l.devices.length} of ${config.max_devices}. Register a computer from the app ("I have a license").`),
+    l.devices.map((d) => {
+      const remove = h("button", { class: "link" }, "Remove");
+      remove.addEventListener("click", () =>
+        busy(remove, async () => {
+          await call("remove_device", { token_id: l.token_id, device_id: d }, "1");
+          showOk("The seat is free.");
+          await refresh();
+        })
+      );
+      return h("p", { class: "mono" }, `${d.slice(0, 8)}...${d.slice(-4)} `, remove);
+    })
+  );
 
   return h(
     "div",
@@ -78,6 +95,7 @@ function card(l) {
       h("dt", {}, "Updates until"),
       h("dd", {}, formatDate(l.updates_until_ms), " ", h("span", { class: current ? "ok-text" : "warn-text" }, current ? "(current)" : "(ended: you keep the builds from before this date)"))
     ),
+    seats,
     h("p", {}, renew),
     sale
   );

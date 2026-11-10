@@ -68,7 +68,7 @@ async function render() {
       "ul",
       {},
       h("li", {}, "An NFT in your NEAR account (NEP-171). It is your license."),
-      h("li", {}, "The registered app: no shareware screen, and the folder check is on."),
+      h("li", {}, "The registered app on up to three computers: no shareware screen, and the folder check is on."),
       h("li", {}, "Each official build released before the end of your update period. Renew to extend it."),
       h("li", {}, "The right to resell. A wallet transfer is refused; use the market, so that the royalty is paid.")
     ),

@@ -44,17 +44,17 @@ if SUMS="$T/SHA256SUMS" DRY_RUN=1 "$ROOT/scripts/record-build.sh" 0.1.1 x y >/de
   fail "record-build.sh accepted an unknown file"
 fi
 
-# The site and the app use the same sign-in message format.
-grep -q 'format!("Register {product}")' "$ROOT/app/src/signin.rs" || fail "app message format"
-grep -q '/^Register \[ -~\]{1,64}\$/' "$ROOT/site/src/pages/sign.js" || fail "site message check"
-for p in nonce port message recipient; do
-  grep -q "${p}=" "$ROOT/app/src/signin.rs" || fail "app sign URL has no $p"
-  grep -q "params.get(\"$p\")" "$ROOT/site/src/pages/sign.js" || fail "site reads no $p"
+# The app and the site use the same register link and contract methods.
+grep -q 'register.html#device={device}&version={VERSION}' "$ROOT/app/src/main.rs" || fail "app register link"
+for p in device version; do
+  grep -q "params.get(\"$p\")" "$ROOT/site/src/pages/register.js" || fail "site reads no $p"
 done
-for p in nonce accountId publicKey signature; do
-  grep -q "\"$p\"" "$ROOT/app/src/signin.rs" || fail "app reads no $p"
-  grep -q "$p:" "$ROOT/site/src/pages/sign.js" || fail "site sends no $p"
+for m in add_device remove_device device_license; do
+  grep -q "pub fn $m(" "$ROOT/contract/src/lib.rs" || fail "contract has no $m"
 done
+grep -q '"add_device"' "$ROOT/site/src/pages/register.js" || fail "site does not call add_device"
+grep -q '"remove_device"' "$ROOT/site/src/pages/licenses.js" || fail "site does not call remove_device"
+grep -q '"device_license"' "$ROOT/app/src/near.rs" || fail "app does not call device_license"
 
 # The contract account and RPC host are the same everywhere.
 for f in app/src/main.rs site/src/near.js scripts/verify.sh scripts/record-build.sh; do
