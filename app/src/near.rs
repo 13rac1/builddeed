@@ -19,16 +19,12 @@ pub struct Near {
 #[derive(Debug, Clone, Deserialize)]
 pub struct LicenseView {
     pub token_id: String,
-    pub owner_id: String,
-    pub purchased_at_ms: u64,
     pub updates_until_ms: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Artifact {
     pub platform: String,
-    pub file: String,
-    pub sha256: String,
     pub attestation_url: Option<String>,
 }
 
