@@ -101,6 +101,7 @@ input[type="text"], input[type="number"] {
 
 /* Cards and tables */
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin: 14px 0; }
+.card > :first-child { margin-top: 0; }
 .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 .grid .card { margin: 0; }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }

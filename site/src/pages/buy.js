@@ -77,7 +77,7 @@ async function render() {
       { class: "muted" },
       "This is NEAR testnet: the NEAR has no value. Get free testnet NEAR from the ",
       h("a", { href: FAUCET }, "faucet"),
-      ". The app is open source: you can also ",
+      ". The source code is public: you can also ",
       h("a", { href: REPO }, "build it yourself"),
       "."
     )

@@ -14,7 +14,7 @@ build of a program. Anyone can read the code and build it.
 ## The problem
 
 Most open source developers are not paid for their work. Closed licenses pay,
-but they lock the code, and nobody can resell a license that they no longer
+but they hide the code, and nobody can resell a license that they no longer
 use. Shareware in the 1990s had a model between the two: try the program
 free, then register to remove the nag screen and get the full version.
 
@@ -152,7 +152,7 @@ The contract on `demo.builddeed.testnet` has the code hash
   DAO.
 - A stolen release key can record a false build. It cannot change or remove
   a recorded build.
-- The registration check is in open source code. It works because most users
+- The registration check is in public source code. It works because most users
   and every business prefer to pay than to rebuild, as with shareware.
 - macOS builds are not reproducible. They have a provenance attestation only.
 - This demo runs on NEAR testnet. Testnet NEAR has no value.
@@ -172,6 +172,7 @@ The contract on `demo.builddeed.testnet` has the code hash
 
 ## License
 
-Business Source License 1.1. See [LICENSE](LICENSE). Personal use is free.
-Business use needs a BuildDeed license. Each version changes to the Apache
-License 2.0 four years after its release.
+Business Source License 1.1. See [LICENSE](LICENSE). This is a
+source-available license, not an open source license: the code is public,
+and each version becomes open source (Apache License 2.0) four years after
+its release. Personal use is free. Business use needs a BuildDeed license.
