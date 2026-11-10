@@ -41,7 +41,7 @@ function card(l) {
     const delist = h("button", { class: "btn small ghost" }, "Take off the market");
     delist.addEventListener("click", () =>
       busy(delist, async () => {
-        await call("delist", { token_id: l.token_id });
+        await call("delist", { token_id: l.token_id }, "1");
         showOk("The license is off the market.");
         await refresh();
       })
@@ -52,7 +52,7 @@ function card(l) {
     const list = h("button", { class: "btn small" }, "List for resale");
     list.addEventListener("click", () =>
       busy(list, async () => {
-        await call("list", { token_id: l.token_id, price: parseNear(price.value) });
+        await call("list", { token_id: l.token_id, price: parseNear(price.value) }, "1");
         showOk("The license is on the market.");
         await refresh();
       })
@@ -63,7 +63,7 @@ function card(l) {
       "div",
       {},
       h("p", {}, "Price in NEAR: ", price, " ", list),
-      h("p", { class: "muted" }, `When it sells, ${royalty}% goes to the developers and contributors, ${fee}% to BuildDeed, and ${100 - royalty - fee}% to you.`)
+      h("p", { class: "muted" }, `The lowest price is ${formatNear(config.renewal_price)} NEAR. When it sells, ${royalty}% goes to the developers and contributors, ${fee}% to BuildDeed, and ${100 - royalty - fee}% to you.`)
     );
   }
 

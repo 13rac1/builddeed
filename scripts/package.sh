@@ -9,7 +9,9 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
-export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$ROOT" log -1 --format=%ct)}
+# SRC=<folder> builds another source tree with this checkout's scripts.
+export SRC=${SRC:-$ROOT}
+export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$SRC" log -1 --format=%ct)}
 
 "$HERE/podman-run.sh" bash -c '
 set -euo pipefail

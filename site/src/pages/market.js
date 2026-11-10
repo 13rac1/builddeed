@@ -37,7 +37,7 @@ function row(l, me) {
     action = h("button", { class: "btn small" }, "Buy");
     action.addEventListener("click", () =>
       busy(action, async () => {
-        await call("buy_listed", { token_id: l.token_id }, l.listed_price);
+        await call("buy_listed", { token_id: l.token_id, price: l.listed_price }, l.listed_price);
         showOk(`License #${l.token_id} is yours. Register the app with it.`);
         await render();
       })

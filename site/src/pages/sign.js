@@ -22,7 +22,7 @@ function b64urlToBytes(s) {
 function problem() {
   if (!Number.isInteger(port) || port < 1024 || port > 65535) return "The port is not valid.";
   if (recipient !== "builddeed") return "The recipient must be builddeed.";
-  if (!/^Register [ -~]{1,80} on this computer$/.test(message)) return "The message is not a BuildDeed registration.";
+  if (!/^Register [ -~]{1,64}$/.test(message)) return "The message is not a BuildDeed registration.";
   try {
     if (b64urlToBytes(nonceB64).length !== 32) return "The nonce must be 32 bytes.";
   } catch {
@@ -78,7 +78,7 @@ if (err) {
   );
   main.replaceChildren(
     h("h1", {}, "Register the app"),
-    h("p", { class: "lead" }, "BuildDeed Checksum on this computer asks your wallet to sign this message:"),
+    h("p", { class: "lead" }, "BuildDeed Checksum on your computer asks your wallet to sign this message:"),
     h("div", { class: "card" }, h("p", { class: "mono" }, message), h("p", { class: "muted" }, `Recipient: ${recipient}. This is not a transaction: it costs nothing and moves nothing.`)),
     button,
     h(
