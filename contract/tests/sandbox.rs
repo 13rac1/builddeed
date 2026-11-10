@@ -145,7 +145,10 @@ async fn sale_resale_and_entitlement_on_sandbox() -> anyhow::Result<()> {
         .into_result()?;
     assert_eq!(balance(&fee).await? - fee1, 9 * NEAR / 100);
     assert_eq!(balance(&contrib).await? - contrib1, 9 * NEAR / 100);
-    assert_eq!(balance(&alice).await? - alice1, 261 * NEAR / 100);
+    // The seller also gets the gas refund of the `list` call, which can
+    // arrive after the balance read above: allow up to 0.02 NEAR more.
+    let seller_got = balance(&alice).await? - alice1;
+    assert!(seller_got >= 261 * NEAR / 100 && seller_got < 263 * NEAR / 100, "seller {seller_got}");
 
     let alice_now: bool = contract
         .view("is_entitled")

@@ -635,7 +635,8 @@ fn storage_cost_since(before: u64) -> NearToken {
 
 fn pay(to: &AccountId, amount: NearToken) {
     if !amount.is_zero() {
-        Promise::new(to.clone()).transfer(amount);
+        // near-sdk schedules the transfer when the Promise is dropped.
+        let _ = Promise::new(to.clone()).transfer(amount);
     }
 }
 
