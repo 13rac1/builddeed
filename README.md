@@ -34,8 +34,11 @@ free, then register to remove the nag screen and get the full version.
 - **The Linux and Windows builds are reproducible.** Anyone with Podman can
   rebuild a release from its recorded commit and get the same bytes.
 - **Licenses can be resold.** The contract has its own market. A resale pays a
-  10% royalty to the developer and contributors. A wallet transfer
-  (`nft_transfer`) is refused, so that the royalty cannot be skipped.
+  10% royalty on the listed price to the developer and contributors. A
+  wallet transfer (`nft_transfer`) is refused, and a resale price is at least
+  the renewal price (2 NEAR in the demo), so that a license cannot change
+  owner without a royalty. Buyer and seller can still agree a higher price
+  and pay the difference outside the contract.
 - **A license covers updates for a period.** The demo license covers the
   builds released in the 365 days after purchase. The owner keeps those
   builds after that time, and can renew.
@@ -54,7 +57,7 @@ NEAR from [near-faucet.io](https://near-faucet.io/).
      enabled after 5 seconds.
 2. Drop any file on the app window.
    - You see: its SHA-256. Drop the installer that you downloaded: the app
-     shows "Official build 0.1.0", the commit and the attestation link.
+     shows "Official build <version>", the commit and the attestation link.
 3. Drop a folder on the window.
    - You see: "The folder check needs a license."
 4. Click "Register", then "Buy a license". On the website, connect your
@@ -73,9 +76,10 @@ NEAR from [near-faucet.io](https://near-faucet.io/).
    - You see: the second account owns the license. The first account got
      2.61 NEAR; the developer, the contributor and the fee account got the
      royalty and the fee. Restart the app of the first account: it shows the
-     nag screen again.
+     nag screen again. (With no network, the app keeps the last check for up
+     to 14 days.)
 8. Go to "Verify a download" and drop a downloaded file.
-   - You see: "Official build 0.1.0 for <platform>", or "no record" for any
+   - You see: "Official build <version> for <platform>", or "no record" for any
      other file.
 
 ### Rebuild a release and compare (optional)
@@ -84,11 +88,12 @@ With Podman (about 6 GB of disk for the build cache):
 
 ```sh
 git clone https://github.com/13rac1/builddeed && cd builddeed
-scripts/verify.sh 0.1.0
+scripts/verify.sh 0.1.1
 ```
 
 You see `SAME` for each Linux and Windows file, compared with the SHA-256 in
-the contract.
+the contract. The script checks that the tag `v0.1.1` points to the commit
+that the contract records, and builds with the scripts of your checkout.
 
 ### The installers are not signed
 
@@ -99,7 +104,7 @@ The hackathon release has no Apple or Windows code signature.
   Settings, Privacy & Security, and click "Open Anyway".
 - Windows: SmartScreen shows "Windows protected your PC". Click "More info",
   then "Run anyway". The installer installs for the current user only.
-- Linux: `sudo apt install ./builddeed-checksum_0.1.0_amd64.deb`, or extract
+- Linux: `sudo apt install ./builddeed-checksum_<version>_amd64.deb`, or extract
   the `.tar.gz` and run `builddeed-checksum`.
 
 ## How NEAR is used
@@ -108,7 +113,7 @@ The hackathon release has no Apple or Windows code signature.
 | --- | --- |
 | License | NEP-171 NFT with NEP-177 metadata and NEP-181 enumeration. The token metadata holds the update period. |
 | Payment split | The contract pays the payees with transfers in the `buy`, `renew` and `buy_listed` calls. |
-| Resale market and royalty | `list`, `delist`, `buy_listed` in the contract. `nft_transfer` is refused. |
+| Resale market and royalty | `list`, `delist` (1 yoctoNEAR, so that only a full-access key can call them), `buy_listed` with the price that the buyer saw. `nft_transfer` is refused. |
 | App registration | NEP-413 signed message. The app checks the ed25519 signature, then checks on chain that the key is a full-access key of the account and that the account owns a license for its version (`is_entitled`). |
 | Build record | `add_build` (append-only), `find_artifact`, `get_builds`. |
 | Release key | A function-call access key of the developer account that can call only `add_build`. The release workflow holds it, not a full-access key. |
@@ -123,15 +128,16 @@ The hackathon release has no Apple or Windows code signature.
 | `site/` | The website (Vite, NEAR Connect). |
 | `build/` | The Podman build image (Rust 1.99.1, pinned by digest; Debian packages from a fixed snapshot) and the NSIS installer script. |
 | `scripts/` | Build, package, record and verify scripts. All Rust builds run in Podman. |
-| `.github/workflows/` | Release (build, attest, publish, record on chain) and Pages. |
+| `.github/workflows/` | CI (all checks), Release (check, build, attest, record on chain, publish) and Pages. |
 
 ### Build and test
 
 You need Podman.
 
 ```sh
-scripts/contract.sh test     # contract: 17 unit tests and the sandbox test
-scripts/app.sh test          # app: unit tests
+scripts/check.sh             # everything below, with rustfmt and clippy
+scripts/contract.sh test     # contract: 40 unit tests and the sandbox test
+scripts/app.sh test          # app: 21 tests (sign-in against a local fake RPC)
 scripts/app.sh linux         # app/target/x86_64-unknown-linux-gnu/release/builddeed-checksum
 scripts/app.sh windows       # app/target/x86_64-pc-windows-gnu/release/builddeed-checksum.exe
 scripts/package.sh           # dist/: .deb, .tar.gz, NSIS installer, SHA256SUMS
@@ -150,8 +156,15 @@ The contract on `demo.builddeed.testnet` has the code hash
 - The developer holds a full-access key of the contract account and can
   deploy new code. A future version locks the contract or gives upgrades to a
   DAO.
-- A stolen release key can record a false build. It cannot change or remove
-  a recorded build.
+- A stolen release key can record a false build, or take a future version
+  name. It cannot change or remove a recorded build, and it can add files to
+  a version only in the 24 hours after the first record of that version.
+  `verify.sh` refuses a version whose tag does not point to the recorded
+  commit.
+- A license is for one person. The signed sign-in works on any computer of
+  that person, so one license can register more than one computer.
+- With no network, the app uses its last license check for up to 14 days.
+  The stored check cannot be proven offline.
 - The registration check is in public source code. It works because most users
   and every business prefer to pay than to rebuild, as with shareware.
 - macOS builds are not reproducible. They have a provenance attestation only.
