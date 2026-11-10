@@ -30,6 +30,18 @@ async fn new_account(root: &Account, name: &str) -> anyhow::Result<Account> {
 }
 
 const NEAR: u128 = 10u128.pow(24);
+/// Storage cost of one byte on NEAR: 10^19 yoctoNEAR.
+const BYTE_COST: u128 = 10u128.pow(19);
+
+/// The balance that is not locked for storage, and the storage in bytes.
+async fn free_balance(a: &Account) -> anyhow::Result<(u128, u64)> {
+    let v = a.view_account().await?;
+    let usage = v.storage_usage;
+    Ok((
+        v.balance.as_yoctonear() - u128::from(usage) * BYTE_COST,
+        usage,
+    ))
+}
 
 #[tokio::test]
 async fn sale_resale_and_entitlement_on_sandbox() -> anyhow::Result<()> {
@@ -91,10 +103,11 @@ async fn sale_resale_and_entitlement_on_sandbox() -> anyhow::Result<()> {
         .await?
         .into_result()?;
 
-    // First sale: 3% fee, then 70/30 between developer and contributor,
-    // less the storage of the new token.
+    // First sale: 3% fee, then 70/30 between developer and contributor.
+    // The storage of the new license comes out of the price first.
     let fee0 = balance(&fee).await?;
     let contrib0 = balance(&contrib).await?;
+    let (free0, usage0) = free_balance(contract.as_account()).await?;
     let out = alice
         .call(contract.id(), "buy")
         .deposit(NearToken::from_near(6))
@@ -103,12 +116,22 @@ async fn sale_resale_and_entitlement_on_sandbox() -> anyhow::Result<()> {
         .await?;
     let license: Value = out.clone().into_result()?.json()?;
     assert_eq!(license["token_id"], "1");
-    let fee_got = balance(&fee).await? - fee0;
-    let contrib_got = balance(&contrib).await? - contrib0;
-    // The fee is 3% of the price less storage: a little under 0.15 NEAR.
-    assert!(fee_got < 15 * NEAR / 100 && fee_got > 14 * NEAR / 100, "fee {fee_got}");
-    // The contributor gets 30% of the rest: a little under 1.455 NEAR.
-    assert!(contrib_got < 1455 * NEAR / 1000 && contrib_got > 1400 * NEAR / 1000, "contrib {contrib_got}");
+    let (free1, usage1) = free_balance(contract.as_account()).await?;
+    let storage_cost = u128::from(usage1 - usage0) * BYTE_COST;
+    let rest = 5 * NEAR - storage_cost;
+    let fee_part = rest * 300 / 10_000;
+    assert_eq!(
+        balance(&fee).await? - fee0,
+        fee_part,
+        "fee of the first sale"
+    );
+    assert_eq!(
+        balance(&contrib).await? - contrib0,
+        (rest - fee_part) * 3000 / 10_000,
+        "contributor share of the first sale"
+    );
+    // The buyer pays the storage: the contract's free balance does not go down.
+    assert!(free1 >= free0, "free balance went down: {free0} -> {free1}");
 
     let entitled: bool = contract
         .view("is_entitled")
@@ -117,38 +140,66 @@ async fn sale_resale_and_entitlement_on_sandbox() -> anyhow::Result<()> {
         .json()?;
     assert!(entitled);
 
-    // A wallet transfer is refused.
+    // A wallet transfer is refused with the market message.
     let refused = alice
         .call(contract.id(), "nft_transfer")
         .args_json(json!({ "receiver_id": bob.id(), "token_id": "1" }))
         .deposit(NearToken::from_yoctonear(1))
         .transact()
         .await?;
-    assert!(refused.is_failure());
+    let err = format!(
+        "{:?}",
+        refused.into_result().expect_err("nft_transfer must fail")
+    );
+    assert!(
+        err.contains("change owner only through the market"),
+        "{err}"
+    );
+
+    // A listing below the renewal price is refused.
+    let low = alice
+        .call(contract.id(), "list")
+        .args_json(json!({ "token_id": "1", "price": "1" }))
+        .deposit(NearToken::from_yoctonear(1))
+        .transact()
+        .await?;
+    let err = format!(
+        "{:?}",
+        low.into_result().expect_err("a 1 yocto listing must fail")
+    );
+    assert!(err.contains("at least the renewal price"), "{err}");
 
     // Resale for 3 NEAR: 3% fee, 10% royalty split 70/30, 87% to the seller.
     alice
         .call(contract.id(), "list")
         .args_json(json!({ "token_id": "1", "price": (3 * NEAR).to_string() }))
+        .deposit(NearToken::from_yoctonear(1))
         .transact()
         .await?
         .into_result()?;
+    // Let the gas refund of the list call arrive before the balance read.
+    worker.fast_forward(5).await?;
     let fee1 = balance(&fee).await?;
     let contrib1 = balance(&contrib).await?;
     let alice1 = balance(&alice).await?;
     bob.call(contract.id(), "buy_listed")
-        .args_json(json!({ "token_id": "1" }))
+        .args_json(json!({ "token_id": "1", "price": (3 * NEAR).to_string() }))
         .deposit(NearToken::from_near(3))
         .max_gas()
         .transact()
         .await?
         .into_result()?;
-    assert_eq!(balance(&fee).await? - fee1, 9 * NEAR / 100);
-    assert_eq!(balance(&contrib).await? - contrib1, 9 * NEAR / 100);
-    // The seller also gets the gas refund of the `list` call, which can
-    // arrive after the balance read above: allow up to 0.02 NEAR more.
-    let seller_got = balance(&alice).await? - alice1;
-    assert!(seller_got >= 261 * NEAR / 100 && seller_got < 263 * NEAR / 100, "seller {seller_got}");
+    assert_eq!(
+        balance(&fee).await? - fee1,
+        9 * NEAR / 100,
+        "fee of the resale"
+    );
+    assert_eq!(
+        balance(&contrib).await? - contrib1,
+        9 * NEAR / 100,
+        "contributor royalty"
+    );
+    assert_eq!(balance(&alice).await? - alice1, 261 * NEAR / 100, "seller");
 
     let alice_now: bool = contract
         .view("is_entitled")
@@ -160,7 +211,7 @@ async fn sale_resale_and_entitlement_on_sandbox() -> anyhow::Result<()> {
         .args_json(json!({ "account_id": bob.id(), "version": "0.1.0" }))
         .await?
         .json()?;
-    assert!(!alice_now);
-    assert!(bob_now);
+    assert!(!alice_now, "the seller is not entitled after the resale");
+    assert!(bob_now, "the buyer is entitled after the resale");
     Ok(())
 }

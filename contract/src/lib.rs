@@ -1,15 +1,17 @@
 //! BuildDeed license contract.
 //!
 //! One contract sells licenses for one product. A license is a NEP-171 token.
-//! It gives its owner the official builds that the developer releases before
-//! `updates_until`. The owner keeps those builds after that time.
+//! It gives its owner the official builds that the developer releases at or
+//! before `updates_until_ms`. The owner keeps those builds after that time.
 //!
 //! The contract also keeps the record of the official builds: for each version,
 //! the commit and the SHA-256 of each artifact. The record is append-only.
 //!
 //! A license changes owner only through the contract's market (`list` and
-//! `buy_listed`), so that each resale pays the royalty. `nft_transfer` and
-//! `nft_transfer_call` are refused.
+//! `buy_listed`), so that each resale pays the royalty on the listed price.
+//! `nft_transfer` and `nft_transfer_call` are refused. A resale price is at
+//! least `renewal_price`, so that a listing at a token price cannot skip the
+//! royalty.
 
 use near_contract_standards::non_fungible_token::core::NonFungibleTokenCore;
 use near_contract_standards::non_fungible_token::enumeration::NonFungibleTokenEnumeration;
@@ -19,19 +21,27 @@ use near_contract_standards::non_fungible_token::metadata::{
 use near_contract_standards::non_fungible_token::{NonFungibleToken, Token, TokenId};
 use near_sdk::collections::LazyOption;
 use near_sdk::json_types::U128;
+use near_sdk::serde_json::json;
 use near_sdk::store::{IterableMap, LookupMap};
 use near_sdk::{
-    env, near, require, AccountId, BorshStorageKey, NearToken, PanicOnDefault, Promise,
-    PromiseOrValue,
+    assert_one_yocto, env, near, require, AccountId, BorshStorageKey, NearToken, PanicOnDefault,
+    Promise, PromiseOrValue,
 };
 
 /// 10 000 basis points = 100%.
 pub const BPS_TOTAL: u32 = 10_000;
 const MS_PER_DAY: u64 = 24 * 60 * 60 * 1000;
+/// After this time from the first record of a version, the version is closed:
+/// `add_build` refuses new artifacts for it.
+pub const VERSION_OPEN_MS: u64 = MS_PER_DAY;
 const MAX_ARTIFACTS: usize = 32;
-const MAX_TEXT: usize = 512;
+const MAX_URL: usize = 512;
+const MAX_NAME: usize = 64;
+const MAX_FILE: usize = 255;
 const MAX_PAGE: u32 = 100;
+const MAX_PAYEES: usize = 16;
 
+// The order of the variants is part of the stored state. Do not change it.
 #[derive(BorshStorageKey)]
 #[near]
 enum StorageKey {
@@ -64,7 +74,8 @@ pub struct Config {
     pub developer: AccountId,
     /// The price of a new license.
     pub price: NearToken,
-    /// The price to add one `update_period_days` to a license.
+    /// The price to add one `update_period_days` to a license. It is also the
+    /// lowest resale price.
     pub renewal_price: NearToken,
     pub update_period_days: u32,
     /// The part of a resale price that goes to `payees`, in basis points.
@@ -132,6 +143,8 @@ pub struct ArtifactMatch {
     pub artifact: Artifact,
 }
 
+// The fields and their order are the stored state. Do not change them
+// without a state migration.
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct Contract {
@@ -198,25 +211,39 @@ impl Contract {
 
         let storage_before = env::storage_usage();
         self.licenses.insert(token_id.clone(), license.clone());
+        // store::LookupMap writes at flush time. Flush now, so that the
+        // measurement below includes the license record.
+        self.licenses.flush();
         let metadata = self.token_metadata(&token_id, &license);
-        self.tokens
-            .internal_mint_with_refund(token_id.clone(), buyer.clone(), Some(metadata), None);
+        self.tokens.internal_mint_with_refund(
+            token_id.clone(),
+            buyer.clone(),
+            Some(metadata),
+            None,
+        );
         let storage_cost = storage_cost_since(storage_before);
         require!(
             storage_cost < price,
             "The price does not cover the storage of a license"
         );
 
-        // The storage of the new token comes out of the price, before the split.
-        self.pay_split(price.saturating_sub(storage_cost));
-        refund(&buyer, excess);
-        env::log_str(&format!(
-            "EVENT_JSON:{{\"standard\":\"builddeed\",\"version\":\"1.0.0\",\"event\":\"buy\",\"data\":[{{\"token_id\":\"{}\",\"owner_id\":\"{}\",\"price\":\"{}\"}}]}}",
-            token_id,
-            buyer,
-            price.as_yoctonear()
+        // The storage of the new license comes out of the price, before the split.
+        self.pay_all(sale_split(
+            price.saturating_sub(storage_cost),
+            self.config.fee_bps,
+            &self.config.fee_account,
+            &self.config.payees,
         ));
-        self.license_view(&token_id).unwrap()
+        pay(&buyer, excess);
+        let event = json!({
+            "standard": "builddeed",
+            "version": "1.0.0",
+            "event": "buy",
+            "data": [{ "token_id": token_id, "owner_id": buyer, "price": price }],
+        });
+        env::log_str(&format!("EVENT_JSON:{event}"));
+        self.license_view(&token_id)
+            .expect("the license was minted above")
     }
 
     /// Adds one update period to a license. The period starts at the later of
@@ -228,33 +255,51 @@ impl Contract {
             self.owner_of(&token_id) == caller,
             "Only the owner can renew a license"
         );
-        let excess = take_payment(self.config.renewal_price);
-        let period = self.period_ms();
+        let price = self.config.renewal_price;
+        let excess = take_payment(price);
         let now = env::block_timestamp_ms();
-        let mut license = self.licenses.get(&token_id).unwrap().clone();
-        license.updates_until_ms = license.updates_until_ms.max(now) + period;
+        let mut license = self
+            .licenses
+            .get(&token_id)
+            .expect("every token has a license record")
+            .clone();
+        license.updates_until_ms = license.updates_until_ms.max(now) + self.period_ms();
         self.licenses.insert(token_id.clone(), license.clone());
         let metadata = self.token_metadata(&token_id, &license);
         if let Some(map) = self.tokens.token_metadata_by_id.as_mut() {
             map.insert(&token_id, &metadata);
         }
-        self.pay_split(self.config.renewal_price);
-        refund(&caller, excess);
-        self.license_view(&token_id).unwrap()
+        self.pay_all(sale_split(
+            price,
+            self.config.fee_bps,
+            &self.config.fee_account,
+            &self.config.payees,
+        ));
+        pay(&caller, excess);
+        self.license_view(&token_id).expect("the license exists")
     }
 
-    /// Puts a license on the market for `price`, or changes its price.
+    /// Puts a license on the market for `price`, or changes its price. The
+    /// price must be at least `renewal_price`. Attach exactly 1 yoctoNEAR, so
+    /// that a function-call access key cannot list a license.
+    #[payable]
     pub fn list(&mut self, token_id: TokenId, price: NearToken) {
+        assert_one_yocto();
         require!(
             self.owner_of(&token_id) == env::predecessor_account_id(),
             "Only the owner can list a license"
         );
-        require!(!price.is_zero(), "The price must be more than zero");
+        require!(
+            price >= self.config.renewal_price,
+            "The resale price must be at least the renewal price"
+        );
         self.listings.insert(token_id, price);
     }
 
-    /// Takes a license off the market.
+    /// Takes a license off the market. Attach exactly 1 yoctoNEAR.
+    #[payable]
     pub fn delist(&mut self, token_id: TokenId) {
+        assert_one_yocto();
         require!(
             self.owner_of(&token_id) == env::predecessor_account_id(),
             "Only the owner can delist a license"
@@ -262,16 +307,21 @@ impl Contract {
         self.listings.remove(&token_id);
     }
 
-    /// Buys a listed license. Attach at least the listed price; the contract
-    /// returns the excess. The BuildDeed fee and the royalty go to their
-    /// accounts, and the remainder goes to the seller.
+    /// Buys a listed license. `price` is the price that the buyer saw; the
+    /// call fails if the listed price is different now. Attach at least
+    /// `price`; the contract returns the excess. The BuildDeed fee and the
+    /// royalty go to their accounts, and the remainder goes to the seller.
     #[payable]
-    pub fn buy_listed(&mut self, token_id: TokenId) -> LicenseView {
+    pub fn buy_listed(&mut self, token_id: TokenId, price: NearToken) -> LicenseView {
         let buyer = env::predecessor_account_id();
-        let price = *self
+        let listed = *self
             .listings
             .get(&token_id)
             .unwrap_or_else(|| env::panic_str("The license is not listed"));
+        require!(
+            listed == price,
+            "The listed price changed. Look at the listing again"
+        );
         let seller = self.owner_of(&token_id);
         require!(buyer != seller, "The owner cannot buy their own license");
         let excess = take_payment(price);
@@ -280,53 +330,68 @@ impl Contract {
         self.tokens
             .internal_transfer(&seller, &buyer, &token_id, None, Some("resale".to_string()));
 
-        let royalty = bps_of(price, self.config.royalty_bps);
-        let fee = bps_of(price, self.config.fee_bps);
-        let to_seller = price.saturating_sub(royalty).saturating_sub(fee);
-        pay(&self.config.fee_account, fee);
-        self.pay_payees(royalty);
-        pay(&seller, to_seller);
-        refund(&buyer, excess);
-        self.license_view(&token_id).unwrap()
+        self.pay_all(resale_split(
+            price,
+            self.config.fee_bps,
+            &self.config.fee_account,
+            self.config.royalty_bps,
+            &self.config.payees,
+            &seller,
+        ));
+        pay(&buyer, excess);
+        self.license_view(&token_id).expect("the license exists")
     }
 
     // ----- Developer -----
 
-    /// Records an official build, or adds artifacts to a recorded version.
-    /// A recorded artifact cannot be changed or removed. The developer can
-    /// give a function-call key that can call only this method to the
-    /// release pipeline.
-    pub fn add_build(&mut self, version: String, commit: String, artifacts: Vec<Artifact>) -> Build {
+    /// Records an official build, or adds artifacts to a version in the first
+    /// 24 hours after its first record. A recorded artifact cannot be changed
+    /// or removed. The developer can give a function-call key that can call
+    /// only this method to the release pipeline.
+    pub fn add_build(
+        &mut self,
+        version: String,
+        commit: String,
+        artifacts: Vec<Artifact>,
+    ) -> Build {
         self.require_developer();
+        check_len(&version, MAX_NAME, "The version");
         require!(
-            !version.is_empty() && version.len() <= 64,
-            "The version must have 1 to 64 characters"
+            is_hex(&commit, 40),
+            "The commit must be 40 lowercase hex characters"
         );
-        require!(is_hex(&commit, 40), "The commit must be 40 lowercase hex characters");
         require!(!artifacts.is_empty(), "Give at least one artifact");
 
+        let now = env::block_timestamp_ms();
         let mut build = match self.builds.get(&version) {
             Some(b) => {
                 require!(b.commit == commit, "This version has a different commit");
+                require!(
+                    now <= b.released_at_ms + VERSION_OPEN_MS,
+                    "This version is closed: record a new version"
+                );
                 b.clone()
             }
             None => Build {
                 version: version.clone(),
                 commit,
-                released_at_ms: env::block_timestamp_ms(),
+                released_at_ms: now,
                 artifacts: vec![],
             },
         };
         for a in artifacts {
             check_artifact(&a);
-            require!(
-                !self.artifact_index.contains_key(&a.sha256),
-                format!("The artifact {} is already recorded", a.sha256)
-            );
-            self.artifact_index.insert(a.sha256.clone(), version.clone());
+            if self.artifact_index.contains_key(&a.sha256) {
+                env::panic_str(&format!("The artifact {} is already recorded", a.sha256));
+            }
+            self.artifact_index
+                .insert(a.sha256.clone(), version.clone());
             build.artifacts.push(a);
         }
-        require!(build.artifacts.len() <= MAX_ARTIFACTS, "Too many artifacts for one version");
+        require!(
+            build.artifacts.len() <= MAX_ARTIFACTS,
+            "Too many artifacts for one version"
+        );
         self.builds.insert(version, build.clone());
         build
     }
@@ -363,12 +428,13 @@ impl Contract {
             .collect()
     }
 
-    /// Licenses on the market, oldest listing first.
+    /// Licenses on the market, in storage order. The order changes when a
+    /// listing is removed.
     pub fn get_listings(&self, from_index: Option<u32>, limit: Option<u32>) -> Vec<LicenseView> {
         self.listings
             .keys()
             .skip(from_index.unwrap_or(0) as usize)
-            .take(limit.unwrap_or(MAX_PAGE).min(MAX_PAGE) as usize)
+            .take(page_limit(limit))
             .filter_map(|id| self.license_view(id))
             .collect()
     }
@@ -377,12 +443,12 @@ impl Contract {
         self.builds.get(&version).cloned()
     }
 
-    /// Builds in the order they were first recorded.
+    /// Builds in storage order (the order of their first record).
     pub fn get_builds(&self, from_index: Option<u32>, limit: Option<u32>) -> Vec<Build> {
         self.builds
             .values()
             .skip(from_index.unwrap_or(0) as usize)
-            .take(limit.unwrap_or(MAX_PAGE).min(MAX_PAGE) as usize)
+            .take(page_limit(limit))
             .cloned()
             .collect()
     }
@@ -455,11 +521,18 @@ impl Contract {
         })
     }
 
+    /// The token metadata holds a copy of the license period for wallets.
+    /// `buy` and `renew` write both, so that they stay the same.
     fn token_metadata(&self, token_id: &TokenId, l: &License) -> TokenMetadata {
+        let extra = json!({
+            "product": self.config.product,
+            "purchased_at_ms": l.purchased_at_ms,
+            "updates_until_ms": l.updates_until_ms,
+        });
         TokenMetadata {
             title: Some(format!("{} license #{}", self.config.product, token_id)),
             description: Some(format!(
-                "Gives the owner the official builds of {} released before the end of the update period.",
+                "Gives the owner the official builds of {} released at or before the end of the update period.",
                 self.config.product
             )),
             media: None,
@@ -469,44 +542,74 @@ impl Contract {
             expires_at: None,
             starts_at: None,
             updated_at: Some(env::block_timestamp_ms().to_string()),
-            extra: Some(format!(
-                "{{\"product\":\"{}\",\"purchased_at_ms\":{},\"updates_until_ms\":{}}}",
-                self.config.product.replace('"', ""),
-                l.purchased_at_ms,
-                l.updates_until_ms
-            )),
+            extra: Some(extra.to_string()),
             reference: None,
             reference_hash: None,
         }
     }
 
-    /// Pays the BuildDeed fee from `amount`, then splits the rest among the
-    /// payees.
-    fn pay_split(&self, amount: NearToken) {
-        let fee = bps_of(amount, self.config.fee_bps);
-        pay(&self.config.fee_account, fee);
-        self.pay_payees(amount.saturating_sub(fee));
-    }
-
-    /// Splits `amount` among the payees by their shares. The first payee
-    /// also gets the remainder of the integer division.
-    fn pay_payees(&self, amount: NearToken) {
-        let mut paid = 0u128;
-        let mut shares: Vec<(AccountId, u128)> = self
-            .config
-            .payees
-            .iter()
-            .map(|p| {
-                let share = amount.as_yoctonear() * u128::from(p.bps) / u128::from(BPS_TOTAL);
-                paid += share;
-                (p.account_id.clone(), share)
-            })
-            .collect();
-        shares[0].1 += amount.as_yoctonear() - paid;
-        for (account, share) in shares {
-            pay(&account, NearToken::from_yoctonear(share));
+    fn pay_all(&self, payments: Vec<(AccountId, u128)>) {
+        for (account, amount) in payments {
+            pay(&account, NearToken::from_yoctonear(amount));
         }
     }
+}
+
+// ----- Payment arithmetic -----
+
+/// The payments of a first sale or a renewal: the BuildDeed fee, then the
+/// rest split among the payees. The parts add up to `amount`.
+pub fn sale_split(
+    amount: NearToken,
+    fee_bps: u16,
+    fee_account: &AccountId,
+    payees: &[Payee],
+) -> Vec<(AccountId, u128)> {
+    let fee = bps_of(amount, fee_bps);
+    let mut out = vec![(fee_account.clone(), fee.as_yoctonear())];
+    out.extend(split_among(amount.saturating_sub(fee), payees));
+    out
+}
+
+/// The payments of a resale: the BuildDeed fee, the royalty split among the
+/// payees, and the remainder to the seller. The parts add up to `price`.
+pub fn resale_split(
+    price: NearToken,
+    fee_bps: u16,
+    fee_account: &AccountId,
+    royalty_bps: u16,
+    payees: &[Payee],
+    seller: &AccountId,
+) -> Vec<(AccountId, u128)> {
+    let fee = bps_of(price, fee_bps);
+    let royalty = bps_of(price, royalty_bps);
+    let mut out = vec![(fee_account.clone(), fee.as_yoctonear())];
+    out.extend(split_among(royalty, payees));
+    out.push((
+        seller.clone(),
+        price
+            .saturating_sub(fee)
+            .saturating_sub(royalty)
+            .as_yoctonear(),
+    ));
+    out
+}
+
+/// Splits `amount` among the payees by their shares. The first payee also
+/// gets the remainder of the integer division.
+fn split_among(amount: NearToken, payees: &[Payee]) -> Vec<(AccountId, u128)> {
+    let total = amount.as_yoctonear();
+    let mut out: Vec<(AccountId, u128)> = Vec::with_capacity(payees.len());
+    let mut paid = 0u128;
+    for p in payees.iter().skip(1) {
+        let share = total * u128::from(p.bps) / u128::from(BPS_TOTAL);
+        paid += share;
+        out.push((p.account_id.clone(), share));
+    }
+    if let Some(first) = payees.first() {
+        out.insert(0, (first.account_id.clone(), total - paid));
+    }
+    out
 }
 
 // ----- NEP-171, NEP-177, NEP-181 -----
@@ -546,7 +649,7 @@ impl NonFungibleTokenCore for Contract {
     }
 }
 
-const TRANSFER_REFUSED: &str =
+pub const TRANSFER_REFUSED: &str =
     "BuildDeed licenses change owner only through the market: call list, and the buyer calls buy_listed";
 
 #[near]
@@ -569,58 +672,86 @@ impl NonFungibleTokenEnumeration for Contract {
         from_index: Option<U128>,
         limit: Option<u64>,
     ) -> Vec<Token> {
-        self.tokens.nft_tokens_for_owner(account_id, from_index, limit)
+        self.tokens
+            .nft_tokens_for_owner(account_id, from_index, limit)
     }
 }
 
 #[near]
 impl NonFungibleTokenMetadataProvider for Contract {
     fn nft_metadata(&self) -> NFTContractMetadata {
-        self.metadata.get().unwrap()
+        self.metadata.get().expect("set in new")
     }
 }
 
-// ----- Helpers -----
+// ----- Checks and helpers -----
+
+fn check_len(s: &str, max: usize, what: &str) {
+    if s.is_empty() || s.len() > max {
+        env::panic_str(&format!("{what} must have 1 to {max} characters"));
+    }
+}
 
 fn check_config(c: &Config) {
-    require!(!c.product.is_empty() && c.product.len() <= 64, "The product name must have 1 to 64 characters");
+    check_len(&c.product, MAX_NAME, "The product name");
     require!(!c.price.is_zero(), "The price must be more than zero");
-    require!(c.update_period_days > 0, "The update period must be more than zero days");
+    require!(
+        !c.renewal_price.is_zero(),
+        "The renewal price must be more than zero"
+    );
+    require!(
+        c.update_period_days > 0,
+        "The update period must be more than zero days"
+    );
     require!(
         u32::from(c.royalty_bps) + u32::from(c.fee_bps) <= BPS_TOTAL,
         "The royalty and the fee together must be at most 100%"
     );
-    require!(!c.payees.is_empty() && c.payees.len() <= 16, "Give 1 to 16 payees");
+    require!(
+        !c.payees.is_empty() && c.payees.len() <= MAX_PAYEES,
+        "Give 1 to 16 payees"
+    );
     let total: u32 = c.payees.iter().map(|p| u32::from(p.bps)).sum();
-    require!(total == BPS_TOTAL, "The payee shares must add up to 10000 basis points");
+    require!(
+        total == BPS_TOTAL,
+        "The payee shares must add up to 10000 basis points"
+    );
 }
 
 fn check_artifact(a: &Artifact) {
-    require!(is_hex(&a.sha256, 64), "The sha256 must be 64 lowercase hex characters");
     require!(
-        !a.platform.is_empty() && a.platform.len() <= 64,
-        "The platform must have 1 to 64 characters"
+        is_hex(&a.sha256, 64),
+        "The sha256 must be 64 lowercase hex characters"
     );
-    require!(!a.file.is_empty() && a.file.len() <= 255, "The file name must have 1 to 255 characters");
+    check_len(&a.platform, MAX_NAME, "The platform");
+    check_len(&a.file, MAX_FILE, "The file name");
     if let Some(url) = &a.attestation_url {
         require!(
-            url.len() <= MAX_TEXT && url.starts_with("https://"),
+            url.len() <= MAX_URL && url.starts_with("https://"),
             "The attestation URL must be https and at most 512 characters"
         );
     }
 }
 
 fn is_hex(s: &str, len: usize) -> bool {
-    s.len() == len && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    s.len() == len
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+fn page_limit(limit: Option<u32>) -> usize {
+    limit.unwrap_or(MAX_PAGE).min(MAX_PAGE) as usize
 }
 
 /// Requires an attached deposit of at least `price` and returns the excess.
 fn take_payment(price: NearToken) -> NearToken {
     let deposit = env::attached_deposit();
-    require!(
-        deposit >= price,
-        format!("Attach at least {} yoctoNEAR", price.as_yoctonear())
-    );
+    if deposit < price {
+        env::panic_str(&format!(
+            "Attach at least {} yoctoNEAR",
+            price.as_yoctonear()
+        ));
+    }
     deposit.saturating_sub(price)
 }
 
@@ -635,13 +766,8 @@ fn storage_cost_since(before: u64) -> NearToken {
 
 fn pay(to: &AccountId, amount: NearToken) {
     if !amount.is_zero() {
-        // near-sdk schedules the transfer when the Promise is dropped.
-        let _ = Promise::new(to.clone()).transfer(amount);
+        Promise::new(to.clone()).transfer(amount).detach();
     }
-}
-
-fn refund(to: &AccountId, amount: NearToken) {
-    pay(to, amount);
 }
 
 #[cfg(test)]
