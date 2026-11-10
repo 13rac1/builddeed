@@ -1,0 +1,46 @@
+# Checks every push to main and every pull request: format, lints, contract
+# and app tests, script tests, and the site build.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The build image installs Debian packages from snapshot.debian.org.
+      # Keep the image between runs, so that each run does not load that server.
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: /tmp/builddeed-build.tar
+          key: builddeed-build-${{ hashFiles('build/Containerfile') }}
+      - name: Load or build the build image
+        run: |
+          if [ -f /tmp/builddeed-build.tar ]; then
+            podman load -i /tmp/builddeed-build.tar
+          else
+            podman build -t localhost/builddeed-build:1 -f build/Containerfile build
+            podman save -o /tmp/builddeed-build.tar localhost/builddeed-build:1
+          fi
+      - name: Check
+        run: scripts/check.sh
+
+  site:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - name: Build
+        working-directory: site
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
