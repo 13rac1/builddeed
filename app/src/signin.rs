@@ -184,6 +184,60 @@ mod tests {
         assert_eq!(url_decode("a+b%2Fc%"), "a b/c%");
     }
 
+    /// The whole sign-in against NEAR testnet, with a real account key in
+    /// place of a wallet. Run it with a NEAR key file of a full-access key:
+    ///   BD_TEST_KEY=/path/key.json BD_TEST_ACCOUNT=name.testnet cargo test -- --ignored signin_against_testnet
+    #[test]
+    #[ignore]
+    fn signin_against_testnet() {
+        use crate::near::nep413_hash;
+        use ed25519_dalek::{Signer, SigningKey};
+        let key: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(std::env::var("BD_TEST_KEY").unwrap()).unwrap()).unwrap();
+        // Some key files have no account_id: then give BD_TEST_ACCOUNT.
+        let account = key["account_id"]
+            .as_str()
+            .map(String::from)
+            .unwrap_or_else(|| std::env::var("BD_TEST_ACCOUNT").unwrap());
+        let public_key = key["public_key"].as_str().unwrap().to_string();
+        let secret = bs58::decode(key["private_key"].as_str().unwrap().trim_start_matches("ed25519:"))
+            .into_vec()
+            .unwrap();
+        let sk = SigningKey::from_bytes(&secret[..32].try_into().unwrap());
+
+        let near = Near { rpc_url: "https://rpc.testnet.fastnear.com".into(), contract: "demo.builddeed.testnet".into() };
+        let pending = start("https://example.invalid", "BuildDeed Checksum").unwrap();
+        let frag = pending.sign_url.split_once('#').unwrap().1;
+        let p = parse_query(frag);
+        let port: u16 = p["port"].parse().unwrap();
+        let nonce: [u8; 32] = B64URL.decode(&p["nonce"]).unwrap().try_into().unwrap();
+        let sig = sk.sign(&nep413_hash(&p["message"], &nonce, RECIPIENT, None));
+        let sig_b64 = base64::engine::general_purpose::STANDARD.encode(sig.to_bytes());
+
+        let client = std::thread::spawn(move || {
+            let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let q = format!(
+                "nonce={}&accountId={}&publicKey={}&signature={}",
+                p["nonce"], url_encode(&account), url_encode(&public_key), url_encode(&sig_b64)
+            );
+            write!(s, "GET /callback?{q} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").unwrap();
+            let mut out = String::new();
+            std::io::Read::read_to_string(&mut s, &mut out).unwrap();
+            out
+        });
+        let signed = pending.finish(&near).expect("sign-in");
+        assert_eq!(signed.account_id, std::env::var("BD_TEST_ACCOUNT").unwrap_or(signed.account_id.clone()));
+        assert!(client.join().unwrap().contains("Registered to"));
+        // A wrong nonce must fail.
+        let pending = start("https://example.invalid", "BuildDeed Checksum").unwrap();
+        let port: u16 = parse_query(pending.sign_url.split_once('#').unwrap().1)["port"].parse().unwrap();
+        std::thread::spawn(move || {
+            let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            write!(s, "GET /callback?nonce=AAAA&accountId=x&publicKey=y&signature=z HTTP/1.1\r\n\r\n").unwrap();
+        });
+        assert!(pending.finish(&near).is_err());
+    }
+
     #[test]
     fn query_parse() {
         let p = parse_query("accountId=alice.testnet&publicKey=ed25519%3AAbc");
