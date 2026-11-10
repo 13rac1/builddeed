@@ -155,7 +155,7 @@ The website: `cd site && npm ci && npm run build` (Node 24).
 ### Deployed contract
 
 The contract on `demo.builddeed.testnet` has the code hash
-`4b4e42010ab7b83a631a5631ca2f167f037e5bf67b55c9cd76addcc4cb232d32`.
+`fc5156d8db6121f310cc92b0082f3f29368d50f780a49066eae19af4bbeaee72`.
 `scripts/contract.sh build` prints the same SHA-256.
 
 ## Trust model and limits
