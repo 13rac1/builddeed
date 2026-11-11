@@ -335,8 +335,9 @@ const keyCommand = () => {
     --contract-account-id ${CONTRACT} --function-names add_build \\
     autogenerate-new-keypair save-to-legacy-keychain \\
     network-config testnet sign-with-legacy-keychain send
-$ gh secret set NEAR_RELEASE_KEY --env release \\
-    < ~/.near-credentials/testnet/${acct}/ed25519_<public-key>.json`;
+$ jq --arg a ${acct} '{account_id: $a, public_key, private_key}' \\
+    ~/.near-credentials/testnet/${acct}/ed25519_<public-key>.json > key.json
+$ gh secret set NEAR_RELEASE_KEY --env release < key.json`;
 };
 const keyPre = h("pre", {}, keyCommand());
 onAccount(() => (keyPre.textContent = keyCommand()));
@@ -392,7 +393,7 @@ main.replaceChildren(
     { class: "muted small" },
     "The key cannot attach NEAR, so each build record takes its storage from the storage balance of your product. ",
     h("a", { href: `${BUILDDEED_REPO}/blob/main/scripts/record-build.sh` }, "scripts/record-build.sh"),
-    " records a release with this key."
+    " records a release with this key. The near-cli-rs key file has no account_id; the jq line writes the key file that the workflow reads."
   ),
   h(
     "ol",
@@ -451,7 +452,9 @@ main.replaceChildren(
     h("a", { href: IRON_DOOM_REPO }, "Iron Doom"),
     " (Bevy, registration from the title screen). Both use the ",
     h("a", { href: "https://github.com/13rac1/builddeed-sdk" }, "BuildDeed SDK"),
-    " (Rust, Apache-2.0; a Bevy plugin is included). Its spec and test data let you write the same check in another language."
+    " (Rust, Apache-2.0; a Bevy plugin is included). Its spec and test data let you write the same check in another language. AI agents can buy, register and download with no browser: see the ",
+    h("a", { href: "agents.md" }, "guide for agents"),
+    "."
   ),
   h("h2", { style: "margin-top:40px" }, "What buyers have to trust"),
   h(

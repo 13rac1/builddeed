@@ -159,11 +159,19 @@ textarea { resize: vertical; }
 .form { display: grid; gap: 14px; }
 .form .field { display: grid; gap: 4px; align-content: start; }
 .form .field > span:first-child { font-weight: 600; font-size: 0.92rem; }
-.form .field input, .form .field textarea { width: 100%; }
+.form .field input:not([type="checkbox"]), .form .field textarea { width: 100%; }
+fieldset.field { border: 0; padding: 0; margin: 0; min-width: 0; }
+.form legend { font-weight: 600; font-size: 0.92rem; padding: 0; margin-bottom: 4px; }
+.checks { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.check { display: inline-flex; align-items: center; gap: 6px; }
 .form .help { font-size: 0.85rem; color: var(--muted); }
 .form .row { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
 .form .payee { display: grid; grid-template-columns: minmax(0, 1fr) 6.5em auto; gap: 8px; align-items: center; }
 .form .payee input { width: 100%; }
+.downloads { list-style: none; padding: 0; margin: 0; }
+.downloads li { padding: 6px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.downloads li:last-child { border-bottom: 0; }
+.downloads .muted { margin-left: 8px; }
 .field-error { color: var(--warn); font-size: 0.85rem; font-weight: 600; }
 input.code-input { font-family: var(--mono); font-size: 1.25rem; letter-spacing: .25em; width: 7.5em; }
 :focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }

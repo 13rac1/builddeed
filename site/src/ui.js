@@ -124,6 +124,7 @@ export function mountChrome() {
             link(pageLink("market.html"), "Market"),
             link(pageLink("verify.html"), "Verify a download"),
             link("developers.html", "For developers"),
+            link("agents.md", "For agents"),
             link("index.html#faq", "Questions")
           )
         ),

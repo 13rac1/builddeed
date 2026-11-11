@@ -1,5 +1,5 @@
 import { h, mountChrome, busy, showOk, showError } from "../ui.js";
-import { view, call, onAccount, signIn, formatNear, formatDate, parseNear, pageLink, loadProducts, tokenNumber } from "../near.js";
+import { view, call, onAccount, signIn, formatNear, formatDate, parseNear, pageLink, loadProducts, tokenNumber, contractError, CONTRACT } from "../near.js";
 
 mountChrome();
 const main = document.getElementById("main");
@@ -14,14 +14,168 @@ async function render(acct) {
     );
     return;
   }
-  const [products, list] = await Promise.all([loadProducts(), view("licenses_for_owner", { account_id: acct })]);
+  const [products, list, budget] = await Promise.all([
+    loadProducts(),
+    view("licenses_for_owner", { account_id: acct }),
+    view("get_budget", { account_id: acct }),
+  ]);
   const byKey = Object.fromEntries(products.map((p) => [p.key, p]));
   const known = list.filter((l) => byKey[l.product]);
   main.replaceChildren(
     head(),
     known.length
       ? h("div", {}, known.map((l) => card(l, byKey[l.product])))
-      : h("p", {}, "This account has no license. ", h("a", { href: pageLink("buy.html") }, "Buy one"), " or look at the ", h("a", { href: pageLink("market.html") }, "market"), ".")
+      : h("p", {}, "This account has no license. ", h("a", { href: pageLink("buy.html") }, "Buy one"), " or look at the ", h("a", { href: pageLink("market.html") }, "market"), "."),
+    budgetSection(acct, budget, products)
+  );
+}
+
+// ----- Agent budget -----
+
+/** The first deposit pays the storage of the budget record, about 0.002 NEAR. */
+const MIN_FIRST_DEPOSIT = 10n ** 22n; // 0.01 NEAR
+
+/** A NEAR amount more than zero as yoctoNEAR, or null. */
+function nearAmount(text) {
+  try {
+    const y = parseNear(text);
+    return BigInt(y) > 0n ? y : null;
+  } catch {
+    return null;
+  }
+}
+
+function agentKeyCommand(acct) {
+  return `$ near account add-key ${acct} grant-function-call-access \\
+    --allowance '0.25 NEAR' \\
+    --contract-account-id ${CONTRACT} \\
+    --function-names buy_from_budget,add_device_from_budget \\
+    autogenerate-new-keypair save-to-legacy-keychain \\
+    network-config testnet sign-with-legacy-keychain send
+$ jq --arg a ${acct} '{account_id: $a, public_key, private_key}' \\
+    ~/.near-credentials/testnet/${acct}/ed25519_<public-key>.json > key.json`;
+}
+
+function budgetSection(acct, budget, products) {
+  const names = Object.fromEntries(products.map((p) => [p.key, p.name]));
+  const status = h("div", { "aria-live": "polite" });
+  const fail = (e) => status.replaceChildren(h("p", { class: "warn-text", role: "alert" }, `The contract refused the call: ${contractError(e)}`));
+  const warn = (msg) => status.replaceChildren(h("p", { class: "warn-text" }, msg));
+
+  // Deposit: the amount, the highest price of one license, the products.
+  // Defaults: the highest price of the products now on sale.
+  const highest = products.reduce((m, p) => (BigInt(p.price) > m ? BigInt(p.price) : m), 0n);
+  const amount = h("input", { type: "text", id: "budget-amount", inputmode: "decimal", value: "1" });
+  const maxPrice = h("input", { type: "text", id: "budget-max", inputmode: "decimal", value: formatNear((budget ? budget.max_price : highest).toString()) });
+  const boxes = products.map((p) =>
+    h("label", { class: "check" }, h("input", { type: "checkbox", value: p.key, checked: budget?.products.includes(p.key) || null }), ` ${p.name}`)
+  );
+  const deposit = h("button", { type: "submit", class: "btn small" }, "Deposit");
+  const depositForm = h(
+    "form",
+    { class: "form", novalidate: true },
+    h(
+      "div",
+      { class: "row" },
+      h("label", { class: "field" }, h("span", {}, "Amount (NEAR)"), amount),
+      h("label", { class: "field" }, h("span", {}, "Highest price of one license (NEAR)"), maxPrice)
+    ),
+    h(
+      "fieldset",
+      { class: "field" },
+      h("legend", {}, "Products the agent can buy"),
+      h("div", { class: "checks" }, boxes),
+      h("span", { class: "help" }, "None selected: all products, also products that are added later.")
+    ),
+    h("div", {}, deposit)
+  );
+  depositForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const a = nearAmount(amount.value);
+    const m = nearAmount(maxPrice.value);
+    if (!a) return warn("Give an amount more than zero, such as 1 or 2.5.");
+    if (!budget && BigInt(a) < MIN_FIRST_DEPOSIT) return warn("The first deposit must be at least 0.01 NEAR: it also pays the storage of the budget, about 0.002 NEAR.");
+    if (!m) return warn("Give a highest price more than zero, such as 0.5.");
+    const keys = boxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value);
+    status.replaceChildren();
+    busy(deposit, async () => {
+      try {
+        await call("deposit_budget", { max_price: m, products: keys }, a);
+        showOk("The agent budget is updated.");
+        await refresh();
+      } catch (err) {
+        fail(err);
+      }
+    });
+  });
+
+  // Withdraw: an amount, or all when the field is empty.
+  const withdrawAmount = h("input", { type: "text", id: "withdraw-amount", inputmode: "decimal", placeholder: "all", "aria-label": "NEAR to withdraw (empty: all)" });
+  const withdraw = h("button", { type: "button", class: "btn small ghost" }, "Withdraw");
+  withdraw.addEventListener("click", () => {
+    const text = withdrawAmount.value.trim();
+    const a = text ? nearAmount(text) : null;
+    if (text && !a) return warn("Give an amount more than zero, or leave the field empty to withdraw all.");
+    if (a && BigInt(a) > BigInt(budget.balance)) return warn(`The balance is ${formatNear(budget.balance)} NEAR.`);
+    status.replaceChildren();
+    busy(withdraw, async () => {
+      try {
+        await call("withdraw_budget", a ? { amount: a } : {}, "1");
+        showOk("The NEAR is back in your account.");
+        await refresh();
+      } catch (err) {
+        fail(err);
+      }
+    });
+  });
+
+  return h(
+    "section",
+    { id: "agent-budget" },
+    h("h2", { style: "margin-top:40px" }, "Agent budget"),
+    h(
+      "p",
+      { class: "muted" },
+      "An AI agent or a script can buy licenses and register computers for you with a function-call key on your account. Such a key cannot attach NEAR, so it pays from this budget. It cannot sell or list a license, withdraw, or change the limits: only your wallet can. ",
+      h("a", { href: "agents.md" }, "Guide for agents")
+    ),
+    h(
+      "div",
+      { class: "card" },
+      budget
+        ? h(
+            "dl",
+            { class: "kv" },
+            h("dt", {}, "Balance"), h("dd", {}, `${formatNear(budget.balance)} NEAR`),
+            h("dt", {}, "Highest price"), h("dd", {}, `${formatNear(budget.max_price)} NEAR for one license`),
+            h("dt", {}, "Products"), h("dd", {}, budget.products.length ? budget.products.map((k) => names[k] || k).join(", ") : "All products")
+          )
+        : h("p", {}, "This account has no agent budget."),
+      h("h3", { style: "margin-top:18px" }, budget ? "Add NEAR or change the limits" : "Deposit a budget"),
+      depositForm,
+      budget ? h("h3", { style: "margin-top:18px" }, "Withdraw") : null,
+      budget ? h("p", {}, withdrawAmount, " NEAR ", withdraw) : null,
+      budget ? h("p", { class: "muted small" }, "Leave the field empty to withdraw all. One wallet transaction with 1 yoctoNEAR attached.") : null,
+      status
+    ),
+    h("h3", { style: "margin-top:24px" }, "Give an agent a key"),
+    h(
+      "p",
+      {},
+      "Run this with near-cli-rs on a computer that has a full-access key of your account. It adds a key that can call only buy_from_budget and add_device_from_budget on ",
+      h("span", { class: "mono" }, CONTRACT),
+      ". The 0.25 NEAR allowance pays only gas; licenses and seats come out of the budget."
+    ),
+    h("div", { class: "terminal" }, h("div", { class: "tbar" }, h("i"), h("i"), h("i")), h("pre", {}, agentKeyCommand(acct))),
+    h(
+      "p",
+      { class: "muted small" },
+      "near-cli-rs saves the new key in ~/.near-credentials/testnet/",
+      acct,
+      "/ed25519_<public-key>.json, and also in ~/.near-credentials/testnet/",
+      acct,
+      ".json when that file does not exist yet. The builddeed CLI reads the key file in that folder as it is. The file also holds a seed phrase, so for an agent on another computer the jq line writes key.json with only account_id, public_key and private_key. Give key.json to the agent. To stop the agent, delete the key or withdraw the budget."
+    )
   );
 }
 

@@ -13,6 +13,11 @@ const drop = h(
   h("p", { class: "muted" }, "The page computes the SHA-256 in your browser. The file does not leave your computer.")
 );
 
+/** The file name, as a download link when the record has a URL. */
+function fileLink(a) {
+  return a.url ? h("a", { href: a.url }, a.file) : a.file;
+}
+
 async function sha256(file) {
   const buf = await file.arrayBuffer();
   const d = await crypto.subtle.digest("SHA-256", buf);
@@ -39,7 +44,7 @@ async function check(file) {
               { class: "kv" },
               h("dt", {}, "Released"), h("dd", {}, formatDate(m.released_at_ms)),
               h("dt", {}, "Commit"), h("dd", {}, product.repo ? h("a", { class: "mono", href: `${product.repo}/commit/${m.commit}` }, m.commit) : h("span", { class: "mono" }, m.commit)),
-              h("dt", {}, "Recorded file"), h("dd", {}, m.artifact.file),
+              h("dt", {}, "Recorded file"), h("dd", {}, fileLink(m.artifact)),
               h("dt", {}, "Attestation"),
               h("dd", {}, m.artifact.attestation_url ? h("a", { href: m.artifact.attestation_url }, "Build provenance") : "none")
             )
@@ -108,7 +113,7 @@ loadProduct()
           {},
           h("td", {}, b.version),
           h("td", {}, a.platform),
-          h("td", {}, a.file),
+          h("td", {}, fileLink(a)),
           h("td", { class: "mono" }, a.sha256),
           h("td", {}, a.attestation_url ? h("a", { href: a.attestation_url }, "link") : "")
         )

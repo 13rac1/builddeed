@@ -4,6 +4,9 @@ import { viewOf, call, onAccount, currentAccount, formatNear, formatDate, tokenN
 mountChrome();
 const main = document.getElementById("main");
 const owned = h("div", {});
+const latest = h("div", {});
+/** The platforms of the "Latest build" list, in this order. */
+const PLATFORMS = ["linux-x86_64", "windows-x86_64", "macos-aarch64"];
 /** The product of this page, after it loads. */
 let product = null;
 
@@ -65,6 +68,7 @@ async function render() {
       buy
     ),
     owned,
+    latest,
     h("h2", {}, "What you get"),
     h(
       "ul",
@@ -106,6 +110,38 @@ async function showOwned(acct) {
   );
 }
 
+/** The newest official file for each platform, with its download link. */
+async function showLatest() {
+  const found = await Promise.all(PLATFORMS.map((platform) => viewOf(product, "latest_build", { product: product.key, platform })));
+  const rows = found.filter(Boolean);
+  if (!rows.length) return;
+  latest.replaceChildren(
+    h(
+      "div",
+      { class: "card" },
+      h("h3", {}, "Latest build"),
+      h(
+        "ul",
+        { class: "downloads" },
+        rows.map((m) =>
+          h(
+            "li",
+            {},
+            h("strong", {}, m.artifact.platform),
+            " ",
+            m.artifact.url ? h("a", { href: m.artifact.url }, m.artifact.file) : h("span", { class: "mono" }, m.artifact.file),
+            h("span", { class: "muted small" }, ` version ${m.version}, ${formatDate(m.released_at_ms)}`)
+          )
+        )
+      ),
+      h("p", { class: "muted small" }, "Each file's SHA-256 is in the license contract. ", h("a", { href: pageLink("verify.html", product) }, "Verify a download"), ".")
+    )
+  );
+}
+
 render()
-  .then(() => onAccount((a) => showOwned(a).catch(() => {})))
+  .then(() => {
+    onAccount((a) => showOwned(a).catch(() => {}));
+    showLatest().catch((e) => console.warn("latest build", e));
+  })
   .catch((e) => main.replaceChildren(h("p", { class: "warn-text" }, `Cannot read the contract: ${e.message}`)));
