@@ -57,7 +57,8 @@ Architecture: amd64
 Maintainer: Hardened Minds <noreply@builddeed.invalid>
 Section: utils
 Priority: optional
-Depends: libc6 (>= 2.36), xdg-utils
+Depends: libc6 (>= 2.36), libfontconfig1, xdg-utils
+Recommends: xdg-desktop-portal
 Description: File checksum tool sold as shareware with a BuildDeed license
  Shows the SHA-256 of a file and its official build record on NEAR.
  The folder check needs a BuildDeed license.
