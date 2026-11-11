@@ -28,7 +28,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use store::{Check, Registration};
+/// The license of this computer, from the contract.
+#[derive(Debug, Clone, PartialEq)]
+struct Registration {
+    /// The owner of the license.
+    account_id: String,
+    token_id: String,
+    updates_until_ms: u64,
+}
 
 const PRODUCT: &str = "BuildDeed Checksum";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -36,7 +43,9 @@ const CONTRACT: &str = "demo.builddeed.testnet";
 const RPC_URL: &str = "https://rpc.testnet.fastnear.com";
 const SITE_URL: &str = "https://13rac1.github.io/builddeed";
 const EXPLORER: &str = "https://testnet.nearblocks.io/address";
-const REG_FILE: &str = "registration.json";
+/// Earlier versions kept the last license check in this file for offline
+/// use. The app no longer reads it, and removes it.
+const OLD_REG_FILE: &str = "registration.json";
 const NAG_WAIT: Duration = Duration::from_secs(5);
 /// While the user registers on the website, the app asks the contract this
 /// often, for at most REGISTER_WAIT.
@@ -54,7 +63,7 @@ struct FileCheck {
 }
 
 enum Msg {
-    Check(Check),
+    Check(Result<Option<Registration>, String>),
     Registered(Result<Registration, String>),
     File(FileCheck),
     Folder(Result<(String, PathBuf), String>),
@@ -95,7 +104,7 @@ impl App {
             rpc_url: RPC_URL.into(),
             contract: CONTRACT.into(),
         });
-        let stored: Option<Registration> = store::load(REG_FILE);
+        store::remove(OLD_REG_FILE);
         let mut app = Self {
             near,
             tx,
@@ -113,7 +122,7 @@ impl App {
             self_check: "Checking this program...".into(),
         };
         match app.device.clone() {
-            Ok(id) => app.spawn_check(id, stored, cc.egui_ctx.clone()),
+            Ok(id) => app.spawn_check(id, cc.egui_ctx.clone()),
             Err(e) => {
                 app.state = State::Unregistered;
                 app.message = e;
@@ -124,21 +133,14 @@ impl App {
     }
 
     /// Asks the contract for this computer's seat at each start, so that a
-    /// license that was sold, or a removed seat, stops working. With no
-    /// network, the stored check from an earlier start can count.
-    fn spawn_check(&self, device: String, stored: Option<Registration>, ctx: egui::Context) {
+    /// license that was sold, or a removed seat, stops working. There is no
+    /// offline mode: with no network the app runs unregistered, because a
+    /// stored result on this computer could be copied or edited.
+    fn spawn_check(&self, device: String, ctx: egui::Context) {
         let near = self.near.clone();
         let tx = self.tx.clone();
         std::thread::spawn(move || {
-            let fresh = license_for(&near, &device);
-            let check = match &stored {
-                Some(r) => store::resolve(fresh, r, store::now_ms()),
-                None => match fresh {
-                    Ok(r) => Check::Fresh(r),
-                    Err(e) => Check::Failed(e),
-                },
-            };
-            let _ = tx.send(Msg::Check(check));
+            let _ = tx.send(Msg::Check(license_for(&near, &device)));
             ctx.request_repaint();
         });
     }
@@ -238,35 +240,19 @@ impl App {
     fn handle_messages(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
-                Msg::Check(Check::Fresh(Some(r))) => {
-                    if let Err(e) = store::save(REG_FILE, &r) {
-                        self.message = e;
-                    }
-                    self.registered(r);
-                }
-                Msg::Check(Check::Grace(r)) => {
-                    // Not saved again: the grace time counts from the last
-                    // check that reached the network.
-                    self.message =
-                        "No network: using the license check from the last start.".into();
-                    self.registered(r);
-                }
-                Msg::Check(Check::Fresh(None)) => {
-                    store::remove(REG_FILE);
+                Msg::Check(Ok(Some(r))) => self.registered(r),
+                Msg::Check(Ok(None)) => {
                     self.reg = None;
                     self.state = State::Unregistered;
-                    self.message = "The stored license is no longer valid for this version.".into();
                 }
-                Msg::Check(Check::Failed(e)) => {
+                Msg::Check(Err(e)) => {
                     self.state = State::Unregistered;
-                    self.message = format!("Cannot check the license: {e}");
+                    self.message =
+                        format!("Cannot check the license, so the app runs unregistered: {e}");
                 }
                 Msg::Registered(Ok(r)) => {
                     self.waiting = None;
-                    self.message = match store::save(REG_FILE, &r) {
-                        Ok(_) => format!("Registered to {}. Thank you!", r.account_id),
-                        Err(e) => format!("Registered to {} for this run only: {e}", r.account_id),
-                    };
+                    self.message = format!("Registered to {}. Thank you!", r.account_id);
                     self.registered(r);
                 }
                 Msg::Registered(Err(e)) => {
@@ -504,7 +490,6 @@ fn license_for(near: &Near, device: &str) -> Result<Option<Registration>, String
             account_id: d.owner_id,
             token_id: d.token_id,
             updates_until_ms: d.updates_until_ms,
-            checked_at_ms: store::now_ms(),
         }))
 }
 
@@ -519,7 +504,6 @@ fn wait_for_seat(near: &Near, device: &str, stop: &AtomicBool) -> Result<Registr
                     account_id: d.owner_id,
                     token_id: d.token_id,
                     updates_until_ms: d.updates_until_ms,
-                    checked_at_ms: store::now_ms(),
                 })
             }
             Ok(Some(d)) => {
