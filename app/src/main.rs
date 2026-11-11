@@ -317,6 +317,12 @@ impl App {
                     ui.spinner();
                     ui.label("Waiting for the registration...");
                 });
+                if let Ok(code) = self.client.confirm_code() {
+                    ui.horizontal(|ui| {
+                        ui.label("If the page asks for a code, enter this one:");
+                        ui.label(RichText::new(code).monospace().strong().size(18.0));
+                    });
+                }
             }
         });
         if !wait_left.is_zero() {
