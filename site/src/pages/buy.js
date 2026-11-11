@@ -1,5 +1,5 @@
 import { h, mountChrome, busy, showOk } from "../ui.js";
-import { view, call, onAccount, currentAccount, formatNear, formatDate, accountLink, FAUCET, REPO } from "../near.js";
+import { view, call, onAccount, currentAccount, formatNear, formatDate, accountLink, FAUCET, REPO, pageLink } from "../near.js";
 
 mountChrome();
 const main = document.getElementById("main");
@@ -27,7 +27,7 @@ async function render() {
     })
   );
   main.replaceChildren(
-    h("h1", {}, `Buy a ${c.product} license`),
+    h("h1", {}, `Buy a license for ${c.product}`),
     h(
       "p",
       { class: "lead" },
@@ -98,7 +98,7 @@ async function showOwned(acct) {
           { class: "card" },
           h("h3", {}, "Your licenses"),
           list.map((l) =>
-            h("p", {}, `License #${l.token_id}, updates until ${formatDate(l.updates_until_ms)}. `, h("a", { href: "licenses.html" }, "Manage"))
+            h("p", {}, `License #${l.token_id}, updates until ${formatDate(l.updates_until_ms)}. `, h("a", { href: pageLink("licenses.html") }, "Manage"))
           )
         )
       : ""

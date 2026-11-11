@@ -1,5 +1,5 @@
 import { h, mountChrome, busy, showOk, showError } from "../ui.js";
-import { view, call, onAccount, signIn, formatNear, formatDate, parseNear } from "../near.js";
+import { view, call, onAccount, signIn, formatNear, formatDate, parseNear, pageLink } from "../near.js";
 
 mountChrome();
 const main = document.getElementById("main");
@@ -20,7 +20,7 @@ async function render(acct) {
     h("h1", {}, "My licenses"),
     list.length
       ? h("div", {}, list.map(card))
-      : h("p", {}, "This account has no license. ", h("a", { href: "buy.html" }, "Buy one"), " or look at the ", h("a", { href: "market.html" }, "market"), ".")
+      : h("p", {}, "This account has no license. ", h("a", { href: pageLink("buy.html") }, "Buy one"), " or look at the ", h("a", { href: pageLink("market.html") }, "market"), ".")
   );
 }
 

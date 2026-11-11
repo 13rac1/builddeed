@@ -3,10 +3,43 @@
 import { NearConnector } from "@hot-labs/near-connect";
 
 export const NETWORK = "testnet";
-export const CONTRACT = "demo.builddeed.testnet";
+/** The products that this site sells. Each has its own license contract. */
+export const PRODUCTS = {
+  demo: {
+    key: "demo",
+    name: "BuildDeed Checksum",
+    contract: "demo.builddeed.testnet",
+    repo: "https://github.com/13rac1/builddeed",
+  },
+  doom: {
+    key: "doom",
+    name: "Iron Doom",
+    contract: "doom.builddeed.testnet",
+    repo: "https://github.com/ai-13rac1/iron-doom",
+  },
+};
+
+/** The product of this page: ?product=doom, or #product=doom (the register
+ * page), or the demo. */
+function pageProduct() {
+  const fromQuery = new URLSearchParams(location.search).get("product");
+  const fromHash = new URLSearchParams(location.hash.slice(1)).get("product");
+  return PRODUCTS[fromQuery] || PRODUCTS[fromHash] || PRODUCTS.demo;
+}
+
+export const PRODUCT = pageProduct();
+export const CONTRACT = PRODUCT.contract;
+
+/** A link to another page of this site for the same product. */
+export function pageLink(page, product = PRODUCT) {
+  return product.key === "demo" ? page : `${page}?product=${product.key}`;
+}
 export const RPC = "https://rpc.testnet.fastnear.com";
 export const EXPLORER = "https://testnet.nearblocks.io";
-export const REPO = "https://github.com/13rac1/builddeed";
+/** The source repository of the product of this page. */
+export const REPO = PRODUCT.repo;
+/** The repository of BuildDeed itself. */
+export const BUILDDEED_REPO = "https://github.com/13rac1/builddeed";
 export const FAUCET = "https://near-faucet.io/";
 const GAS = "100000000000000"; // 100 Tgas
 

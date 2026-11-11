@@ -1,8 +1,33 @@
 import { h, mountChrome } from "../ui.js";
-import { view, formatNear, formatDate, accountLink, REPO } from "../near.js";
+import { view, formatNear, formatDate, accountLink, REPO, PRODUCTS, pageLink } from "../near.js";
 
 mountChrome();
 document.getElementById("download").href = `${REPO}/releases/latest`;
+document.getElementById("buy").href = pageLink("buy.html");
+
+const DESCRIPTIONS = {
+  demo: "A file checksum tool. Registered: the folder check, which reports the files that changed since the last check.",
+  doom: "A Doom source port in Rust (GPL-3.0). Unregistered: E1M1 and the shareware screen. Registered from the title screen: every map of episode 1.",
+};
+document.getElementById("products").replaceChildren(
+  ...Object.values(PRODUCTS).map((p) =>
+    h(
+      "div",
+      { class: "card" },
+      h("h3", {}, p.name),
+      h("p", {}, DESCRIPTIONS[p.key]),
+      h(
+        "p",
+        {},
+        h("a", { class: "btn small", href: pageLink("buy.html", p) }, "Buy a license"),
+        " ",
+        h("a", { href: `${p.repo}/releases/latest` }, "Download"),
+        " · ",
+        h("a", { href: p.repo }, "Source")
+      )
+    )
+  )
+);
 
 const terms = document.getElementById("terms");
 const builds = document.getElementById("builds");
@@ -47,7 +72,7 @@ view("get_builds", { from_index: 0, limit: 20 })
           ` released ${formatDate(b.released_at_ms)}, commit `,
           h("a", { href: `${REPO}/commit/${b.commit}`, class: "mono" }, b.commit.slice(0, 12)),
           `, ${b.artifacts.length} files. `,
-          h("a", { href: "verify.html" }, "Hashes")
+          h("a", { href: pageLink("verify.html") }, "Hashes")
         )
       )
     );

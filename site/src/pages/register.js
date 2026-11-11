@@ -1,8 +1,10 @@
-// The app opens this page as register.html#device=<64 hex>&version=<x.y.z>.
+// The app opens this page as
+// register.html#product=<key>&device=<64 hex>&version=<x.y.z>
+// (no product: the demo).
 // The owner picks a license and registers the computer with one wallet
 // transaction (add_device). The app sees the seat a few seconds later.
 import { h, mountChrome, busy, showError } from "../ui.js";
-import { view, call, onAccount, signIn, formatDate } from "../near.js";
+import { view, call, onAccount, signIn, formatDate, pageLink } from "../near.js";
 
 mountChrome();
 const main = document.getElementById("main");
@@ -25,7 +27,7 @@ function invalid() {
 
 async function render(acct) {
   const intro = [
-    h("h1", {}, "Register this computer"),
+    h("h1", {}, `Register this computer for ${config.product}`),
     h(
       "p",
       { class: "lead" },
@@ -60,7 +62,7 @@ async function render(acct) {
   if (!licenses.length) {
     main.replaceChildren(
       ...intro,
-      h("p", {}, "This account has no license. ", h("a", { href: "buy.html" }, "Buy one"), ", then come back to this page.")
+      h("p", {}, "This account has no license. ", h("a", { href: pageLink("buy.html") }, "Buy one"), ", then come back to this page.")
     );
     return;
   }
@@ -82,7 +84,7 @@ function card(l) {
     h("h3", {}, `License #${l.token_id}`),
     h("p", {}, `Updates until ${formatDate(l.updates_until_ms)}. Seats: ${l.devices.length} of ${config.max_devices}.`),
     full
-      ? h("p", { class: "muted" }, "All seats are in use. Remove a computer on ", h("a", { href: "licenses.html" }, "My licenses"), " first.")
+      ? h("p", { class: "muted" }, "All seats are in use. Remove a computer on ", h("a", { href: pageLink("licenses.html") }, "My licenses"), " first.")
       : add,
     h("p", { class: "muted" }, "One wallet transaction. It costs about 0.01 NEAR for storage; the contract returns the rest.")
   );

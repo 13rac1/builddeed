@@ -76,6 +76,9 @@ code, .mono { font-family: var(--mono); font-size: 0.9em; overflow-wrap: anywher
 .site-header nav { display: flex; flex-wrap: wrap; gap: 4px 14px; flex: 1; }
 .site-header nav a { color: var(--muted); text-decoration: none; padding: 4px 0; }
 .site-header nav a[aria-current="page"] { color: var(--ink); border-bottom: 2px solid var(--accent); }
+.products { display: flex; gap: 6px; }
+.products a { text-decoration: none; }
+.products a[aria-current="true"] { border-color: var(--accent); color: var(--ink); font-weight: 600; }
 .wallet .acct { display: flex; gap: 10px; align-items: center; font-family: var(--mono); font-size: 0.9rem; }
 .site-footer { border-top: 1px solid var(--line); padding: 20px 16px 40px; color: var(--muted); font-size: 0.9rem; text-align: center; }
 .site-footer p { max-width: 70ch; margin: 0 auto; }

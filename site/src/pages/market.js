@@ -1,5 +1,5 @@
 import { h, mountChrome, busy, showOk, showError } from "../ui.js";
-import { view, call, onAccount, currentAccount, formatNear, formatDate, accountLink } from "../near.js";
+import { view, call, onAccount, currentAccount, formatNear, formatDate, accountLink, pageLink } from "../near.js";
 
 mountChrome();
 const main = document.getElementById("main");
@@ -25,7 +25,7 @@ async function render() {
             listings.map((l) => row(l, me))
           )
         )
-      : h("p", {}, "No license is on the market now. Owners can list a license on ", h("a", { href: "licenses.html" }, "My licenses"), ".")
+      : h("p", {}, "No license is on the market now. Owners can list a license on ", h("a", { href: pageLink("licenses.html") }, "My licenses"), ".")
   );
 }
 

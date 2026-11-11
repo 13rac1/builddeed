@@ -1,7 +1,18 @@
 // Shared page parts: the header with the wallet button, the footer, and a
 // small DOM helper. Data from the chain goes into the page as text only.
 import "./style.css";
-import { getConnector, onAccount, signIn, signOut, REPO, CONTRACT, accountLink } from "./near.js";
+import {
+  getConnector,
+  onAccount,
+  signIn,
+  signOut,
+  BUILDDEED_REPO,
+  CONTRACT,
+  PRODUCT,
+  PRODUCTS,
+  pageLink,
+  accountLink,
+} from "./near.js";
 
 /** h("a", { href: "..." }, "text", child) -> element */
 export function h(tag, attrs = {}, ...children) {
@@ -43,7 +54,18 @@ export function mountChrome() {
       "nav",
       {},
       NAV.map(([href, label]) =>
-        h("a", { href, "aria-current": href === here ? "page" : null }, label)
+        h("a", { href: pageLink(href), "aria-current": href === here ? "page" : null }, label)
+      )
+    ),
+    h(
+      "div",
+      { class: "products", role: "group", "aria-label": "Product" },
+      Object.values(PRODUCTS).map((p) =>
+        h(
+          "a",
+          { href: pageLink(here, p), class: "pill", "aria-current": p.key === PRODUCT.key ? "true" : null },
+          p.name
+        )
       )
     ),
     wallet
@@ -57,10 +79,12 @@ export function mountChrome() {
       h(
         "p",
         {},
-        "Built at NEAR HACKATHON 2026 by Hardened Minds. Testnet demo: the license contract is ",
+        "Built at NEAR HACKATHON 2026 by Hardened Minds. Testnet demo: the license contract of ",
+        PRODUCT.name,
+        " is ",
         h("a", { href: accountLink(CONTRACT) }, CONTRACT),
-        ". Source: ",
-        h("a", { href: REPO }, "github.com/13rac1/builddeed"),
+        ". BuildDeed source: ",
+        h("a", { href: BUILDDEED_REPO }, "github.com/13rac1/builddeed"),
         " (Business Source License 1.1)."
       )
     )
