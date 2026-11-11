@@ -117,6 +117,9 @@ fn artifact(c: char) -> Artifact {
         file: format!("app-{c}.deb"),
         sha256: sha(c),
         attestation_url: Some("https://github.com/13rac1/builddeed/attestations/1".into()),
+        url: Some(format!(
+            "https://github.com/13rac1/builddeed/releases/download/v1/app-{c}.deb"
+        )),
     }
 }
 
@@ -1341,24 +1344,268 @@ fn artifact_checks() {
                 attestation_url: Some("http://x".into()),
                 ..artifact('a')
             },
-            "must be https",
+            "The attestation URL must be https",
         ),
         (
             Artifact {
-                attestation_url: Some(format!("https://{}", "x".repeat(510))),
+                attestation_url: Some(format!("https://{}", "x".repeat(505))),
                 ..artifact('a')
             },
-            "must be https",
+            "The attestation URL must be https",
+        ),
+        (
+            Artifact {
+                url: Some("http://x".into()),
+                ..artifact('a')
+            },
+            "The download URL must be https",
+        ),
+        (
+            Artifact {
+                url: Some(format!("https://{}", "x".repeat(505))),
+                ..artifact('a')
+            },
+            "The download URL must be https",
         ),
     ];
     for (a, want) in cases {
         let msg = panic_text(|| check_artifact(&a));
         assert!(msg.contains(want), "{want}: got {msg}");
     }
+    // The limits themselves are allowed, and both URLs are optional.
     check_artifact(&Artifact {
         file: "f".repeat(255),
+        attestation_url: Some(format!("https://{}", "x".repeat(504))),
+        url: Some(format!("https://{}", "x".repeat(504))),
         ..artifact('a')
     });
+    check_artifact(&Artifact {
+        attestation_url: None,
+        url: None,
+        ..artifact('a')
+    });
+}
+
+#[test]
+#[should_panic(expected = "The download URL must be https")]
+fn add_build_refuses_an_http_download_url() {
+    let mut c = setup();
+    call("dev.near", yocto(0), 5_000);
+    let a = Artifact {
+        url: Some("http://example.com/app.deb".into()),
+        ..artifact('a')
+    };
+    c.add_build(P.into(), "0.1.0".into(), commit('a'), vec![a]);
+}
+
+// ----- Latest build -----
+
+fn for_platform(c: char, platform: &str) -> Artifact {
+    Artifact {
+        platform: platform.into(),
+        ..artifact(c)
+    }
+}
+
+#[test]
+fn latest_build_gives_the_newest_version_with_a_file_for_the_platform() {
+    let mut c = setup_two();
+    call("dev.near", yocto(0), 5_000);
+    c.add_build(
+        P.into(),
+        "0.1.0".into(),
+        commit('a'),
+        vec![
+            for_platform('a', "linux-x86_64"),
+            for_platform('b', "windows-x86_64"),
+        ],
+    );
+    call("dev.near", yocto(0), 6_000);
+    c.add_build(
+        P.into(),
+        "0.2.0".into(),
+        commit('b'),
+        vec![
+            for_platform('c', "linux-x86_64"),
+            for_platform('e', "linux-x86_64"),
+        ],
+    );
+    call("dev.near", yocto(0), 7_000);
+    c.add_build(
+        P.into(),
+        "0.3.0".into(),
+        commit('c'),
+        vec![for_platform('d', "macos-aarch64")],
+    );
+    // A newer build of the other product does not count.
+    call("dev2.near", yocto(0), 8_000);
+    c.add_build(
+        Q.into(),
+        "9.0".into(),
+        commit('f'),
+        vec![for_platform('f', "linux-x86_64")],
+    );
+
+    let latest = |c: &Contract, product: &str, platform: &str| {
+        c.latest_build(product.into(), platform.into())
+    };
+    let linux = latest(&c, P, "linux-x86_64").expect("linux build");
+    assert_eq!(
+        (linux.version.as_str(), linux.commit),
+        ("0.2.0", commit('b'))
+    );
+    assert_eq!(linux.released_at_ms, 6_000);
+    assert_eq!(linux.artifact.sha256, sha('c'), "the first file recorded");
+    assert_eq!(linux.artifact.url, artifact('c').url);
+    let windows = latest(&c, P, "windows-x86_64").expect("windows build");
+    assert_eq!(
+        (windows.version.as_str(), windows.artifact.sha256),
+        ("0.1.0", sha('b'))
+    );
+    let mac = latest(&c, P, "macos-aarch64").expect("macos build");
+    assert_eq!(mac.version, "0.3.0");
+    assert!(
+        latest(&c, P, "freebsd-x86_64").is_none(),
+        "unknown platform"
+    );
+    assert!(
+        latest(&c, "nothing", "linux-x86_64").is_none(),
+        "unknown product"
+    );
+    assert_eq!(latest(&c, Q, "linux-x86_64").unwrap().version, "9.0");
+    assert!(latest(&c, Q, "windows-x86_64").is_none());
+}
+
+#[test]
+fn latest_build_takes_files_added_to_a_version_in_its_first_day() {
+    let mut c = setup();
+    call("dev.near", yocto(0), 5_000);
+    c.add_build(
+        P.into(),
+        "0.1.0".into(),
+        commit('a'),
+        vec![for_platform('a', "linux-x86_64")],
+    );
+    c.add_build(
+        P.into(),
+        "0.2.0".into(),
+        commit('b'),
+        vec![for_platform('b', "linux-x86_64")],
+    );
+    // The windows file of 0.1.0 comes after the record of 0.2.0.
+    call("dev.near", yocto(0), 6_000);
+    c.add_build(
+        P.into(),
+        "0.1.0".into(),
+        commit('a'),
+        vec![for_platform('c', "windows-x86_64")],
+    );
+    assert_eq!(
+        c.latest_build(P.into(), "windows-x86_64".into())
+            .unwrap()
+            .version,
+        "0.1.0"
+    );
+    assert_eq!(
+        c.latest_build(P.into(), "linux-x86_64".into())
+            .unwrap()
+            .version,
+        "0.2.0"
+    );
+}
+
+// ----- Agent budget -----
+
+fn budget(c: &Contract, who: &str) -> Budget {
+    c.get_budget(acc(who)).expect("budget")
+}
+
+/// Alice deposits `deposit` into her budget. She allows `products` (empty:
+/// all) and prices up to 5 NEAR.
+fn deposit(c: &mut Contract, deposit: NearToken, products: &[&str]) -> Budget {
+    call("alice.near", deposit, 10_000);
+    c.deposit_budget(near(5), products.iter().map(|p| p.to_string()).collect())
+}
+
+#[test]
+#[should_panic(expected = "Attach at least 1 yoctoNEAR")]
+fn deposit_budget_refuses_a_zero_deposit() {
+    let mut c = setup();
+    deposit(&mut c, yocto(0), &[]);
+}
+
+#[test]
+#[should_panic(expected = "No product has this key")]
+fn deposit_budget_refuses_an_unknown_product() {
+    let mut c = setup();
+    deposit(&mut c, near(10), &[P, "nothing"]);
+}
+
+#[test]
+#[should_panic(expected = "Give at most 16 products")]
+fn deposit_budget_refuses_17_products() {
+    let mut c = setup();
+    deposit(&mut c, near(10), &[P; 17]);
+}
+
+#[test]
+#[should_panic(expected = "The deposit does not cover the storage of the budget")]
+fn deposit_budget_refuses_a_deposit_below_the_record_cost() {
+    let mut c = setup();
+    deposit(&mut c, yocto(1), &[]);
+}
+
+#[test]
+fn deposit_budget_sets_the_limits_and_keeps_the_rest_as_balance() {
+    let mut c = setup_two();
+    assert!(c.get_budget(acc("alice.near")).is_none());
+    call("alice.near", near(10), 10_000);
+    let before = env::storage_usage();
+    let b = c.deposit_budget(near(4), vec![P.into()]);
+    let record = cost_since(before);
+    assert!(record > 0);
+    assert_eq!(b.balance.as_yoctonear(), near(10).as_yoctonear() - record);
+    assert_eq!(b.max_price, near(4));
+    assert_eq!(b.products, vec![P]);
+    assert_eq!(budget(&c, "alice.near"), b);
+}
+
+#[test]
+fn a_second_deposit_adds_to_the_balance_and_replaces_the_limits() {
+    let mut c = setup_two();
+    let first = deposit(&mut c, near(10), &[P]).balance.as_yoctonear();
+    // The record keeps its size: all of the deposit goes to the balance.
+    call("alice.near", near(2), 10_000);
+    let b = c.deposit_budget(near(3), vec![P.into()]);
+    assert_eq!(b.balance.as_yoctonear(), first + near(2).as_yoctonear());
+    assert_eq!(b.max_price, near(3));
+    // A longer product list: the deposit pays the added storage first.
+    call("alice.near", near(1), 10_000);
+    let before = env::storage_usage();
+    let b = c.deposit_budget(near(2), vec![P.into(), Q.into()]);
+    let grown = cost_since(before);
+    assert!(grown > 0);
+    assert_eq!(
+        b.balance.as_yoctonear(),
+        first + near(3).as_yoctonear() - grown
+    );
+    assert_eq!(b.max_price, near(2));
+    assert_eq!(b.products, vec![P, Q]);
+    // An empty list allows all products.
+    call("alice.near", near(1), 10_000);
+    let b = c.deposit_budget(near(5), vec![]);
+    assert!(b.products.is_empty());
+    assert_eq!(budget(&c, "alice.near"), b);
+}
+
+#[test]
+fn buy_from_budget_refuses_without_a_budget() {
+    let mut c = setup();
+    call("alice.near", yocto(0), 10_000);
+    let msg = panic_text(|| {
+        c.buy_from_budget(P.into());
+    });
+    assert!(msg.contains("This account has no agent budget"), "{msg}");
 }
 
 // ----- Isolation between products -----
@@ -1678,4 +1925,225 @@ fn views_refuse_oversized_inputs() {
             .is_some(),
         "normal input"
     );
+}
+
+#[test]
+fn buy_from_budget_refuses_a_product_outside_the_list() {
+    let mut c = setup_two();
+    deposit(&mut c, near(10), &[Q]);
+    call("alice.near", yocto(0), 10_000);
+    let msg = panic_text(|| {
+        c.buy_from_budget(P.into());
+    });
+    assert!(msg.contains("does not allow this product"), "{msg}");
+}
+
+#[test]
+fn buy_from_budget_refuses_a_price_above_max_price() {
+    let mut c = setup();
+    call("alice.near", near(10), 10_000);
+    c.deposit_budget(
+        NearToken::from_yoctonear(near(5).as_yoctonear() - 1),
+        vec![],
+    );
+    call("alice.near", yocto(0), 10_000);
+    let msg = panic_text(|| {
+        c.buy_from_budget(P.into());
+    });
+    assert!(msg.contains("more than the highest price"), "{msg}");
+}
+
+#[test]
+fn buy_from_budget_refuses_a_low_balance() {
+    let mut c = setup();
+    // The balance is 5 NEAR less the record cost: below the price.
+    deposit(&mut c, near(5), &[]);
+    call("alice.near", yocto(0), 10_000);
+    let msg = panic_text(|| {
+        c.buy_from_budget(P.into());
+    });
+    assert!(msg.contains("The agent budget is too low"), "{msg}");
+}
+
+#[test]
+fn buy_from_budget_takes_the_price_and_pays_as_buy() {
+    let mut c = setup();
+    let start = deposit(&mut c, near(20), &[P]).balance.as_yoctonear();
+    call("alice.near", yocto(0), 10_000);
+    let before = env::storage_usage();
+    let l = c.buy_from_budget(P.into());
+    let storage = cost_since(before);
+    let paid = transfers();
+    assert_eq!(
+        (l.token_id.as_str(), l.owner_id.as_str()),
+        (T1, "alice.near")
+    );
+    assert_eq!(l.updates_until_ms, 10_000 + 365 * DAY_MS);
+    assert_eq!(
+        budget(&c, "alice.near").balance.as_yoctonear(),
+        start - near(5).as_yoctonear()
+    );
+    // The same payments as buy: the license storage comes out of the price,
+    // then the fee and the payee shares. Nothing goes to the buyer.
+    let want = sale_split(
+        yocto(near(5).as_yoctonear() - storage),
+        300,
+        &acc("fee.near"),
+        &terms().payees,
+    );
+    assert_eq!(paid, want);
+    assert_eq!(
+        amount_of(&paid, "alice.near"),
+        0,
+        "no transfer to the buyer"
+    );
+}
+
+#[test]
+fn add_device_from_budget_takes_the_seat_storage() {
+    let mut c = setup();
+    deposit(&mut c, near(20), &[]);
+    call("alice.near", yocto(0), 10_000);
+    c.buy_from_budget(P.into());
+    let start = budget(&c, "alice.near").balance.as_yoctonear();
+    call("alice.near", yocto(0), 20_000);
+    let before = env::storage_usage();
+    let l = c.add_device_from_budget(T1.into(), dev('a'));
+    let seat = cost_since(before);
+    assert!(seat > 0);
+    assert_eq!(l.devices, vec![dev('a')]);
+    assert_eq!(
+        budget(&c, "alice.near").balance.as_yoctonear(),
+        start - seat
+    );
+    assert!(transfers().is_empty(), "no transfers");
+    assert_eq!(
+        c.device_license(P.into(), dev('a'), "x".into())
+            .unwrap()
+            .token_id,
+        T1
+    );
+}
+
+#[test]
+fn add_device_from_budget_refuses_a_non_owner() {
+    let mut c = with_license();
+    call("bob.near", near(1), 10_000);
+    c.deposit_budget(near(5), vec![]);
+    call("bob.near", yocto(0), 20_000);
+    let msg = panic_text(|| {
+        c.add_device_from_budget(T1.into(), dev('a'));
+    });
+    assert!(msg.contains("Only the owner can register"), "{msg}");
+}
+
+#[test]
+fn add_device_from_budget_refuses_a_low_balance() {
+    let mut c = with_license();
+    let b = deposit(&mut c, near(1), &[]);
+    // Leave 1 yoctoNEAR in the budget.
+    call("alice.near", yocto(YOCTO), 10_000);
+    c.withdraw_budget(Some(yocto(b.balance.as_yoctonear() - 1)));
+    assert_eq!(budget(&c, "alice.near").balance, yocto(1));
+    call("alice.near", yocto(0), 20_000);
+    let msg = panic_text(|| {
+        c.add_device_from_budget(T1.into(), dev('a'));
+    });
+    assert!(msg.contains("The agent budget is too low"), "{msg}");
+}
+
+#[test]
+fn add_device_from_budget_refuses_without_a_budget() {
+    let mut c = with_license();
+    call("alice.near", yocto(0), 20_000);
+    let msg = panic_text(|| {
+        c.add_device_from_budget(T1.into(), dev('a'));
+    });
+    assert!(msg.contains("This account has no agent budget"), "{msg}");
+}
+
+#[test]
+fn withdraw_budget_pays_the_amount_to_the_owner() {
+    let mut c = setup();
+    let start = deposit(&mut c, near(10), &[]).balance.as_yoctonear();
+    call("alice.near", yocto(YOCTO), 10_000);
+    let b = c.withdraw_budget(Some(near(3)));
+    assert_eq!(b.balance.as_yoctonear(), start - near(3).as_yoctonear());
+    let paid = transfers();
+    assert_eq!(paid, vec![(acc("alice.near"), near(3).as_yoctonear())]);
+    assert_eq!(budget(&c, "alice.near"), b);
+}
+
+#[test]
+fn withdraw_budget_without_an_amount_pays_all() {
+    let mut c = setup();
+    let start = deposit(&mut c, near(10), &[]).balance.as_yoctonear();
+    call("alice.near", yocto(YOCTO), 10_000);
+    let b = c.withdraw_budget(None);
+    assert_eq!(b.balance, yocto(0));
+    assert_eq!(transfers(), vec![(acc("alice.near"), start)]);
+    // The limits stay.
+    assert_eq!(b.max_price, near(5));
+}
+
+#[test]
+fn withdraw_budget_rules() {
+    let mut c = setup();
+    let start = deposit(&mut c, near(10), &[]).balance.as_yoctonear();
+    let cases: Vec<(&str, NearToken, Option<NearToken>, &str)> = vec![
+        ("alice.near", yocto(0), Some(near(1)), "exactly 1 yoctoNEAR"),
+        ("alice.near", yocto(2), Some(near(1)), "exactly 1 yoctoNEAR"),
+        (
+            "alice.near",
+            yocto(YOCTO),
+            Some(yocto(start + 1)),
+            "The agent budget is too low",
+        ),
+        (
+            "bob.near",
+            yocto(YOCTO),
+            None,
+            "This account has no agent budget",
+        ),
+    ];
+    for (who, attached, amount, want) in cases {
+        call(who, attached, 10_000);
+        let msg = panic_text(|| {
+            c.withdraw_budget(amount);
+        });
+        assert!(msg.contains(want), "{want}: {msg}");
+    }
+    assert_eq!(budget(&c, "alice.near").balance.as_yoctonear(), start);
+}
+
+#[test]
+fn a_budget_serves_only_its_owner() {
+    let mut c = setup();
+    let alice_start = deposit(&mut c, near(20), &[]).balance.as_yoctonear();
+    // Bob has no budget: he cannot buy from alice's.
+    call("bob.near", yocto(0), 10_000);
+    let msg = panic_text(|| {
+        c.buy_from_budget(P.into());
+    });
+    assert!(msg.contains("This account has no agent budget"), "{msg}");
+    // With his own budget, bob pays from his own balance.
+    call("bob.near", near(6), 10_000);
+    let bob_start = c.deposit_budget(near(5), vec![]).balance.as_yoctonear();
+    call("bob.near", yocto(0), 10_000);
+    let l = c.buy_from_budget(P.into());
+    assert_eq!(l.owner_id, acc("bob.near"));
+    call("bob.near", yocto(0), 20_000);
+    let before = env::storage_usage();
+    c.add_device_from_budget(l.token_id.clone(), dev('a'));
+    let seat = cost_since(before);
+    assert_eq!(
+        budget(&c, "bob.near").balance.as_yoctonear(),
+        bob_start - near(5).as_yoctonear() - seat
+    );
+    assert_eq!(budget(&c, "alice.near").balance.as_yoctonear(), alice_start);
+    // Bob cannot withdraw from alice's budget: he withdraws from his own.
+    call("bob.near", yocto(YOCTO), 20_000);
+    c.withdraw_budget(None);
+    assert_eq!(transfers()[0].0, acc("bob.near"));
+    assert_eq!(budget(&c, "alice.near").balance.as_yoctonear(), alice_start);
 }

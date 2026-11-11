@@ -3,7 +3,8 @@
 //! Build the WASM first (`scripts/contract.sh build`). The test reads it from
 //! `BUILDDEED_WASM`, or from the default release path.
 
-use near_workspaces::types::NearToken;
+use near_workspaces::result::ExecutionFinalResult;
+use near_workspaces::types::{AccessKey, Gas, KeyType, NearToken, SecretKey};
 use near_workspaces::{Account, Contract};
 use serde_json::{json, Value};
 
@@ -87,6 +88,26 @@ async fn is_entitled(
     Ok(v.as_bool().expect("is_entitled returns a bool"))
 }
 
+/// The budget balance of an account, in yoctoNEAR.
+async fn budget_balance(contract: &Contract, account: &Account) -> anyhow::Result<u128> {
+    let b = view(
+        contract,
+        "get_budget",
+        json!({ "account_id": account.id() }),
+    )
+    .await?;
+    Ok(b["balance"].as_str().expect("a budget").parse()?)
+}
+
+/// The error text of a call that must fail. A transaction that the network
+/// refuses before it runs is a failure too.
+fn failure(out: near_workspaces::Result<ExecutionFinalResult>, what: &str) -> String {
+    match out {
+        Err(e) => format!("{e:?}"),
+        Ok(o) => format!("{:?}", o.into_result().expect_err(what)),
+    }
+}
+
 #[tokio::test]
 async fn two_products_sale_resale_and_isolation_on_sandbox() -> anyhow::Result<()> {
     let worker = near_workspaces::sandbox().await?;
@@ -98,6 +119,7 @@ async fn two_products_sale_resale_and_isolation_on_sandbox() -> anyhow::Result<(
     let fee = new_account(&root, "fee").await?;
     let alice = new_account(&root, "alice").await?;
     let bob = new_account(&root, "bob").await?;
+    let carol = new_account(&root, "carol").await?;
     let contract: Contract = root
         .create_subaccount("demo")
         .initial_balance(NearToken::from_near(10))
@@ -408,5 +430,119 @@ async fn two_products_sale_resale_and_isolation_on_sandbox() -> anyhow::Result<(
     .await?;
     assert_eq!(seat["token_id"], "doom:1", "the seat in doom stays");
     assert_eq!(seat["covers_version"], true);
+    // Agent budget. Carol deposits with her full-access key, then gives an
+    // agent a function-call key that can call only the two budget methods.
+    carol
+        .call(contract.id(), "deposit_budget")
+        .args_json(json!({ "max_price": (5 * NEAR).to_string(), "products": ["checksum"] }))
+        .deposit(NearToken::from_near(12))
+        .transact()
+        .await?
+        .into_result()?;
+    let budget0 = budget_balance(&contract, &carol).await?;
+    assert!(budget0 > 11 * NEAR && budget0 < 12 * NEAR, "{budget0}");
+    let agent_key = SecretKey::from_random(KeyType::ED25519);
+    carol
+        .batch(carol.id())
+        .add_key(
+            agent_key.public_key(),
+            AccessKey::function_call_access(
+                contract.id(),
+                &["buy_from_budget", "add_device_from_budget"],
+                Some(NearToken::from_near(1)),
+            ),
+        )
+        .transact()
+        .await?
+        .into_result()?;
+    let agent = Account::from_secret_key(carol.id().clone(), agent_key, &worker);
+
+    let bought: Value = agent
+        .call(contract.id(), "buy_from_budget")
+        .args_json(json!({ "product": "checksum" }))
+        // The prepaid gas must fit in the allowance of the key.
+        .gas(Gas::from_tgas(300))
+        .transact()
+        .await?
+        .into_result()?
+        .json()?;
+    assert_eq!(bought["token_id"], "checksum:2");
+    assert_eq!(bought["owner_id"], carol.id().as_str());
+    let budget1 = budget_balance(&contract, &carol).await?;
+    assert_eq!(budget1, budget0 - 5 * NEAR, "the budget pays the price");
+
+    let agent_device = "f".repeat(64);
+    agent
+        .call(contract.id(), "add_device_from_budget")
+        .args_json(json!({ "token_id": "checksum:2", "device_id": agent_device }))
+        .transact()
+        .await?
+        .into_result()?;
+    let budget2 = budget_balance(&contract, &carol).await?;
+    assert!(
+        budget2 < budget1 && budget1 - budget2 < NEAR / 100,
+        "the budget pays the seat storage: {budget1} -> {budget2}"
+    );
+    let seat = view(
+        &contract,
+        "device_license",
+        json!({ "product": "checksum", "device_id": agent_device, "version": "0.1.0" }),
+    )
+    .await?;
+    assert_eq!(seat["token_id"], "checksum:2");
+
+    // The function-call key cannot withdraw the budget or list the license.
+    let withdraw = agent
+        .call(contract.id(), "withdraw_budget")
+        .args_json(json!({}))
+        .deposit(NearToken::from_yoctonear(1))
+        .transact()
+        .await;
+    let err = failure(
+        withdraw,
+        "withdraw_budget with a function-call key must fail",
+    );
+    assert!(err.contains("DepositWithFunctionCall"), "{err}");
+    // Without the deposit, the key refuses the method name.
+    let withdraw = agent
+        .call(contract.id(), "withdraw_budget")
+        .args_json(json!({}))
+        .transact()
+        .await;
+    let err = failure(
+        withdraw,
+        "withdraw_budget with a function-call key must fail",
+    );
+    assert!(err.contains("MethodNameMismatch"), "{err}");
+    let list = agent
+        .call(contract.id(), "list")
+        .args_json(json!({ "token_id": "checksum:2", "price": (3 * NEAR).to_string() }))
+        .deposit(NearToken::from_yoctonear(1))
+        .transact()
+        .await;
+    let err = failure(list, "list with a function-call key must fail");
+    assert!(err.contains("DepositWithFunctionCall"), "{err}");
+    assert_eq!(budget_balance(&contract, &carol).await?, budget2);
+    let license = view(
+        &contract,
+        "get_license",
+        json!({ "token_id": "checksum:2" }),
+    )
+    .await?;
+    assert_eq!(license["owner_id"], carol.id().as_str());
+    assert!(
+        license["listed_price"].is_null(),
+        "the license is not listed"
+    );
+
+    // The full-access key can withdraw all of it.
+    carol
+        .call(contract.id(), "withdraw_budget")
+        .args_json(json!({}))
+        .deposit(NearToken::from_yoctonear(1))
+        .transact()
+        .await?
+        .into_result()?;
+    assert_eq!(budget_balance(&contract, &carol).await?, 0);
     Ok(())
 }

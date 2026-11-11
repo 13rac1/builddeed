@@ -18,14 +18,16 @@ CONTRACT=${CONTRACT:-licenses.builddeed.testnet}
 PRODUCT=${PRODUCT:-checksum}
 NETWORK=${NETWORK:-testnet}
 RPC=${RPC:-https://rpc.testnet.fastnear.com}
+# Where the release workflow publishes the files: the record gets each file's URL.
+RELEASE_URL=${RELEASE_URL:-https://github.com/13rac1/builddeed/releases/download/v$VERSION}
 SUMS=${SUMS:-$ROOT/dist/SHA256SUMS}
 DRY_RUN=${DRY_RUN:-}
 
 # Prints the add_build arguments, or nothing when every file is recorded.
 build_args() {
-  python3 -I - "$SUMS" "$VERSION" "$COMMIT" "$ATTESTATION" "$CONTRACT" "$RPC" "$DRY_RUN" "$PRODUCT" <<'PY'
+  python3 -I - "$SUMS" "$VERSION" "$COMMIT" "$ATTESTATION" "$CONTRACT" "$RPC" "$DRY_RUN" "$PRODUCT" "$RELEASE_URL" <<'PY'
 import base64, json, sys, urllib.request
-sums, version, commit, attestation, contract, rpc, dry_run, product = sys.argv[1:9]
+sums, version, commit, attestation, contract, rpc, dry_run, product, release_url = sys.argv[1:10]
 
 def recorded(sha):
     if dry_run:
@@ -56,7 +58,8 @@ for line in open(sums):
         print(f"already recorded: {name}", file=sys.stderr)
         continue
     artifacts.append({"platform": platform(name), "file": name, "sha256": sha,
-                      "attestation_url": attestation or None})
+                      "attestation_url": attestation or None,
+                      "url": f"{release_url}/{name}"})
 print(json.dumps({"product": product, "version": version, "commit": commit, "artifacts": artifacts}) if artifacts else "")
 PY
 }

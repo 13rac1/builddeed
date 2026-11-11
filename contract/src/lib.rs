@@ -77,6 +77,7 @@ enum StorageKey {
     Listings,
     Devices,
     TokenDevices,
+    Budgets,
 }
 
 /// A share of a sale.
@@ -166,6 +167,21 @@ pub struct License {
     pub updates_until_ms: u64,
 }
 
+/// NEAR that an owner put in the contract for an agent, with limits. A
+/// function-call key of the owner can buy licenses and register computers
+/// from it (`buy_from_budget`, `add_device_from_budget`), because such a key
+/// cannot attach NEAR. Only a full-access key can deposit, change the
+/// limits or withdraw: those methods need an attached deposit.
+#[near(serializers = [json, borsh])]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Budget {
+    pub balance: NearToken,
+    /// The highest price of one license that the budget pays.
+    pub max_price: NearToken,
+    /// The products that the budget can buy. Empty: all products.
+    pub products: Vec<String>,
+}
+
 #[near(serializers = [json])]
 #[derive(Clone, Debug)]
 pub struct LicenseView {
@@ -203,6 +219,8 @@ pub struct Artifact {
     pub sha256: String,
     /// The URL of the provenance attestation for this file.
     pub attestation_url: Option<String>,
+    /// The https URL to download the file, for example a GitHub release asset.
+    pub url: Option<String>,
 }
 
 /// One official release.
@@ -248,6 +266,8 @@ pub struct Contract {
     devices: LookupMap<String, TokenId>,
     /// token id -> device ids
     token_devices: LookupMap<TokenId, Vec<String>>,
+    /// owner -> agent budget
+    budgets: LookupMap<AccountId, Budget>,
 }
 
 #[near]
@@ -285,6 +305,7 @@ impl Contract {
             listings: IterableMap::new(StorageKey::Listings),
             devices: LookupMap::new(StorageKey::Devices),
             token_devices: LookupMap::new(StorageKey::TokenDevices),
+            budgets: LookupMap::new(StorageKey::Budgets),
         }
     }
 
@@ -367,12 +388,96 @@ impl Contract {
     #[payable]
     pub fn buy(&mut self, product: String) -> LicenseView {
         let buyer = env::predecessor_account_id();
-        let p = self.product(&product).clone();
+        let excess = take_payment(self.product(&product).terms.price);
+        let view = self.sell(&buyer, &product);
+        pay(&buyer, excess);
+        view
+    }
+
+    /// Buys a new license of `product` for the caller and pays it from the
+    /// caller's agent budget. A function-call key can call it.
+    pub fn buy_from_budget(&mut self, product: String) -> LicenseView {
+        let buyer = env::predecessor_account_id();
+        let price = self.product(&product).terms.price;
+        let mut b = self.budget_of(&buyer);
+        require!(
+            b.products.is_empty() || b.products.contains(&product),
+            "The agent budget does not allow this product"
+        );
+        require!(
+            price <= b.max_price,
+            "The price is more than the highest price of the agent budget"
+        );
+        require!(b.balance >= price, "The agent budget is too low");
+        b.balance = b.balance.saturating_sub(price);
+        self.budgets.insert(buyer.clone(), b);
+        self.sell(&buyer, &product)
+    }
+
+    // ----- Agent budget -----
+
+    /// Adds the attached NEAR to the caller's agent budget and sets its
+    /// limits: the highest price of one license, and the products (empty:
+    /// all). Attach at least 1 yoctoNEAR, so that a function-call key cannot
+    /// change the limits. The storage of a new budget comes out of the
+    /// deposit.
+    #[payable]
+    pub fn deposit_budget(&mut self, max_price: NearToken, products: Vec<String>) -> Budget {
+        let owner = env::predecessor_account_id();
+        let deposit = env::attached_deposit();
+        require!(
+            !deposit.is_zero(),
+            "Attach at least 1 yoctoNEAR: only a full-access key can change a budget"
+        );
+        require!(products.len() <= MAX_PAYEES, "Give at most 16 products");
+        for p in &products {
+            require!(self.products.contains_key(p), "No product has this key");
+        }
+        let before = env::storage_usage();
+        let mut b = self.budgets.get(&owner).cloned().unwrap_or(Budget {
+            balance: NearToken::from_yoctonear(0),
+            max_price,
+            products: vec![],
+        });
+        b.max_price = max_price;
+        b.products = products;
+        self.budgets.insert(owner.clone(), b.clone());
+        self.budgets.flush();
+        let cost = storage_cost_since(before);
+        require!(
+            deposit >= cost,
+            "The deposit does not cover the storage of the budget"
+        );
+        let b = self.budgets.get_mut(&owner).expect("inserted above");
+        b.balance = b.balance.saturating_add(deposit.saturating_sub(cost));
+        b.clone()
+    }
+
+    /// Pays `amount` of the caller's agent budget back to the caller, or all
+    /// of it. Attach exactly 1 yoctoNEAR.
+    #[payable]
+    pub fn withdraw_budget(&mut self, amount: Option<NearToken>) -> Budget {
+        assert_one_yocto();
+        let owner = env::predecessor_account_id();
+        let mut b = self.budget_of(&owner);
+        let amount = amount.unwrap_or(b.balance);
+        require!(amount <= b.balance, "The agent budget is too low");
+        b.balance = b.balance.saturating_sub(amount);
+        self.budgets.insert(owner.clone(), b.clone());
+        pay(&owner, amount);
+        b
+    }
+
+    // ----- Sales (internal) -----
+
+    /// Mints a license of `product` to `buyer` and pays the price to the
+    /// fee account and the payees. The caller has taken the price.
+    fn sell(&mut self, buyer: &AccountId, product: &str) -> LicenseView {
+        let p = self.product(product).clone();
         let price = p.terms.price;
-        let excess = take_payment(price);
 
         let token_id = format!("{product}:{}", p.next_token);
-        self.product_mut(&product).next_token += 1;
+        self.product_mut(product).next_token += 1;
         let now = env::block_timestamp_ms();
         let license = License {
             purchased_at_ms: now,
@@ -404,7 +509,6 @@ impl Contract {
             &self.settings.fee_account,
             &p.terms.payees,
         ));
-        pay(&buyer, excess);
         let event = json!({
             "standard": "builddeed",
             "version": "1.0.0",
@@ -526,18 +630,39 @@ impl Contract {
     #[payable]
     pub fn add_device(&mut self, token_id: TokenId, device_id: String) -> LicenseView {
         let caller = env::predecessor_account_id();
+        let cost = self.seat(&caller, &token_id, device_id);
+        let excess = take_payment(cost);
+        pay(&caller, excess);
+        self.license_view(&token_id).expect("the license exists")
+    }
+
+    /// Registers a computer on a license, as `add_device`, and pays the
+    /// storage from the caller's agent budget. A function-call key can call
+    /// it.
+    pub fn add_device_from_budget(&mut self, token_id: TokenId, device_id: String) -> LicenseView {
+        let caller = env::predecessor_account_id();
+        let mut b = self.budget_of(&caller);
+        let cost = self.seat(&caller, &token_id, device_id);
+        require!(b.balance >= cost, "The agent budget is too low");
+        b.balance = b.balance.saturating_sub(cost);
+        self.budgets.insert(caller, b);
+        self.license_view(&token_id).expect("the license exists")
+    }
+
+    /// Adds a seat and returns the cost of its storage. The caller pays it.
+    fn seat(&mut self, caller: &AccountId, token_id: &TokenId, device_id: String) -> NearToken {
         require!(
-            self.owner_of(&token_id) == caller,
+            self.owner_of(token_id) == *caller,
             "Only the owner can register a computer"
         );
         require!(
             is_hex(&device_id, 64),
             "The device id must be 64 lowercase hex characters"
         );
-        let product = product_of(&token_id).to_string();
+        let product = product_of(token_id).to_string();
         let seat_key = format!("{product}:{device_id}");
         if let Some(other) = self.devices.get(&seat_key) {
-            if *other == token_id {
+            if other == token_id {
                 env::panic_str("This computer is already registered on this license");
             }
             env::panic_str("This computer is registered on another license. Remove it there first");
@@ -545,7 +670,7 @@ impl Contract {
         let max = self.product(&product).terms.max_devices;
         let mut list = self
             .token_devices
-            .get(&token_id)
+            .get(token_id)
             .cloned()
             .unwrap_or_default();
         if list.len() >= usize::from(max) {
@@ -559,10 +684,7 @@ impl Contract {
         self.devices.insert(seat_key, token_id.clone());
         self.token_devices.flush();
         self.devices.flush();
-        let cost = storage_cost_since(storage_before);
-        let excess = take_payment(cost);
-        pay(&caller, excess);
-        self.license_view(&token_id).expect("the license exists")
+        storage_cost_since(storage_before)
     }
 
     /// Removes a computer from a license, so that its seat is free again.
@@ -769,6 +891,28 @@ impl Contract {
             .unwrap_or_default()
     }
 
+    /// The agent budget of an account, or None.
+    pub fn get_budget(&self, account_id: AccountId) -> Option<Budget> {
+        self.budgets.get(&account_id).cloned()
+    }
+
+    /// The newest build of `product` that has a file for `platform` (for
+    /// example "linux-x86_64"), and that file. With more than one file for
+    /// the platform, the first recorded one.
+    pub fn latest_build(&self, product: String, platform: String) -> Option<ArtifactMatch> {
+        let list = self.versions.get(&product)?;
+        list.iter().rev().find_map(|v| {
+            let b = self.builds.get(&format!("{product}:{v}"))?;
+            let artifact = b.artifacts.iter().find(|a| a.platform == platform)?.clone();
+            Some(ArtifactMatch {
+                version: b.version.clone(),
+                commit: b.commit.clone(),
+                released_at_ms: b.released_at_ms,
+                artifact,
+            })
+        })
+    }
+
     /// Finds the official build of `product` that contains a file with this
     /// SHA-256.
     pub fn find_artifact(&self, product: String, sha256: String) -> Option<ArtifactMatch> {
@@ -808,6 +952,12 @@ impl Contract {
     }
 
     // ----- Internal -----
+
+    fn budget_of(&self, owner: &AccountId) -> Budget {
+        self.budgets.get(owner).cloned().unwrap_or_else(|| {
+            env::panic_str("This account has no agent budget. Call deposit_budget")
+        })
+    }
 
     fn product(&self, key: &str) -> &Product {
         self.products
@@ -1172,6 +1322,12 @@ fn check_artifact(a: &Artifact) {
         require!(
             url.len() <= MAX_URL && url.starts_with("https://"),
             "The attestation URL must be https and at most 512 characters"
+        );
+    }
+    if let Some(url) = &a.url {
+        require!(
+            url.len() <= MAX_URL && url.starts_with("https://"),
+            "The download URL must be https and at most 512 characters"
         );
     }
 }
