@@ -1,0 +1,461 @@
+// The window of BuildDeed Checksum. build.rs compiles this file with the
+// widget style of the target system. The Rust code in src/main.rs sets the
+// properties and handles the callbacks.
+
+import { AboutSlint, Button, Palette, ScrollView, Spinner, VerticalBox } from "std-widgets.slint";
+
+export enum AppState { checking, registered, unregistered }
+
+// Text in the color of the window text.
+component Label inherits Text {
+    color: Palette.foreground;
+    wrap: word-wrap;
+}
+
+// Smaller text in a lighter color.
+component Note inherits Label {
+    font-size: 11px;
+    color: Palette.foreground.transparentize(30%);
+}
+
+// Text that opens a URL in the browser.
+component Link inherits Text {
+    in property <string> url;
+    color: Palette.accent-background;
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { Platform.open-url(root.url); }
+    }
+}
+
+// Read-only text that the user can select and copy.
+component CopyText inherits TextInput {
+    read-only: true;
+    color: Palette.foreground;
+    selection-background-color: Palette.selection-background;
+    selection-foreground-color: Palette.selection-foreground;
+    public function copy-all() {
+        self.select-all();
+        self.copy();
+        self.clear-selection();
+    }
+}
+
+// A box in the middle of the window, over a dark layer that takes all
+// clicks: the user must use the buttons of the box.
+component Overlay inherits Rectangle {
+    in property <length> box-width: 460px;
+    background: #00000080;
+    TouchArea { }
+    Rectangle {
+        width: min(max(root.box-width, box.min-width), root.width - 32px);
+        height: min(box.preferred-height, root.height - 32px);
+        background: Palette.background;
+        border-color: Palette.border;
+        border-width: 1px;
+        border-radius: 10px;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #00000060;
+        box := VerticalBox {
+            padding: 20px;
+            spacing: 10px;
+            @children
+        }
+    }
+}
+
+export component MainWindow inherits Window {
+    title: "BuildDeed Checksum";
+    preferred-width: 720px;
+    preferred-height: 520px;
+    min-width: 480px;
+    min-height: 400px;
+    background: Palette.background;
+
+    in property <AppState> app-state: AppState.checking;
+    in property <string> registered-text;
+    in property <string> mono-font;
+    in property <string> product-version;
+
+    // The nag screen.
+    in property <bool> nag-open;
+    in property <bool> waiting;
+    in property <string> confirm-code;
+    in property <bool> can-continue;
+    in property <string> continue-label: "Continue unregistered";
+    in property <string> message;
+
+    in property <bool> busy;
+    in property <bool> drop-hover;
+
+    // The last file.
+    in property <bool> file-shown;
+    in property <string> file-path;
+    in property <string> file-sha;
+    in property <string> file-error;
+    in property <string> record-text;
+    in property <bool> record-official;
+    in property <string> attestation-url;
+
+    // The last folder check.
+    in property <bool> folder-shown;
+    in property <string> folder-report;
+    in property <string> folder-saved;
+    in property <string> folder-error;
+
+    in property <string> about-line;
+    in property <string> self-check;
+    in property <string> device-line;
+    in property <string> licenses-url;
+    in property <string> verify-url;
+    in property <string> contract-url;
+
+    in-out property <bool> about-open;
+
+    callback buy();
+    callback register();
+    callback stop-waiting();
+    callback continue-unregistered();
+    callback open-nag();
+    callback choose-file();
+    callback choose-folder();
+    // Background threads call it when they have a result for the window.
+    callback messages-arrived();
+
+    property <bool> dark: Palette.color-scheme == ColorScheme.dark;
+    property <color> red: dark ? #ff6b6b : #c82828;
+    property <color> green: dark ? #5fd38a : #1e8c3c;
+    property <bool> modal: nag-open || about-open;
+
+    MenuBar {
+        Menu {
+            title: "File";
+            MenuItem {
+                title: "Choose a file…";
+                enabled: !root.modal;
+                activated => { root.choose-file(); }
+            }
+            MenuItem {
+                title: "Check a folder…";
+                enabled: !root.modal;
+                activated => { root.choose-folder(); }
+            }
+        }
+        Menu {
+            title: "Help";
+            MenuItem {
+                title: "Licenses and resale";
+                activated => { Platform.open-url(root.licenses-url); }
+            }
+            MenuItem {
+                title: "Verify a download";
+                activated => { Platform.open-url(root.verify-url); }
+            }
+            MenuItem {
+                title: "License contract";
+                activated => { Platform.open-url(root.contract-url); }
+            }
+            MenuSeparator { }
+            MenuItem {
+                title: "About BuildDeed Checksum";
+                enabled: !root.nag-open;
+                activated => { root.about-open = true; }
+            }
+        }
+    }
+
+    VerticalBox {
+        spacing: 10px;
+
+        // The license status.
+        HorizontalLayout {
+            spacing: 8px;
+            height: 32px;
+            if root.app-state == AppState.registered: Label {
+                text: root.registered-text;
+                color: root.green;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+            if root.app-state == AppState.checking: Label {
+                text: "Checking the license...";
+                vertical-alignment: center;
+            }
+            if root.app-state == AppState.unregistered: Label {
+                text: "UNREGISTERED";
+                color: root.red;
+                font-weight: 700;
+                vertical-alignment: center;
+                horizontal-stretch: 0;
+            }
+            if root.app-state == AppState.unregistered: Button {
+                text: "Register";
+                clicked => { root.open-nag(); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        Label {
+            text: "BuildDeed Checksum";
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        // Drop or choose a file or a folder.
+        Rectangle {
+            border-radius: 8px;
+            border-width: root.drop-hover ? 2px : 1px;
+            border-color: root.drop-hover ? Palette.accent-background : Palette.border;
+            background: root.drop-hover ? Palette.accent-background.transparentize(85%) : Palette.alternate-background;
+            VerticalLayout {
+                padding: 14px;
+                spacing: 8px;
+                Label {
+                    text: "Drop a file on this window to see its SHA-256 and its official build record.";
+                }
+                Label {
+                    text: root.app-state == AppState.registered
+                        ? "Drop a folder to check it against its last check."
+                        : "Drop a folder to check it against its last check (needs a license).";
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Button {
+                        text: "Choose a file…";
+                        primary: true;
+                        enabled: !root.busy;
+                        clicked => { root.choose-file(); }
+                    }
+                    Button {
+                        text: "Check a folder…";
+                        enabled: !root.busy;
+                        clicked => { root.choose-folder(); }
+                    }
+                    if root.busy: Spinner {
+                        indeterminate: true;
+                        width: 24px;
+                        height: 24px;
+                    }
+                }
+            }
+        }
+
+        // The results.
+        results-view := ScrollView {
+            vertical-stretch: 1;
+            content-width: self.visible-width;
+            content-height: results.preferred-height;
+            results := VerticalLayout {
+                width: results-view.visible-width;
+                spacing: 10px;
+                alignment: start;
+
+                if root.file-shown: Rectangle {
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: Palette.border;
+                    background: Palette.control-background;
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 6px;
+                        Label {
+                            text: root.file-path;
+                            font-weight: 700;
+                        }
+                        if root.file-sha != "": HorizontalLayout {
+                            spacing: 8px;
+                            sha := CopyText {
+                                text: root.file-sha;
+                                font-family: root.mono-font;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                            Button {
+                                text: "Copy";
+                                horizontal-stretch: 0;
+                                clicked => { sha.copy-all(); }
+                            }
+                        }
+                        if root.file-error != "": Label {
+                            text: root.file-error;
+                            color: root.red;
+                        }
+                        if root.record-text != "": Label {
+                            text: root.record-text;
+                            color: root.record-official ? root.green : Palette.foreground;
+                        }
+                        if root.attestation-url != "": Link {
+                            text: "Build attestation";
+                            url: root.attestation-url;
+                        }
+                    }
+                }
+
+                if root.folder-shown: VerticalLayout {
+                    spacing: 6px;
+                    if root.folder-error != "": Label {
+                        text: root.folder-error;
+                        color: root.red;
+                    }
+                    if root.folder-error == "": VerticalLayout {
+                        spacing: 6px;
+                        Rectangle {
+                            border-radius: 8px;
+                            border-width: 1px;
+                            border-color: Palette.border;
+                            background: Palette.control-background;
+                            VerticalLayout {
+                                padding: 12px;
+                                report := CopyText {
+                                    text: root.folder-report;
+                                    font-family: root.mono-font;
+                                    single-line: false;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Note {
+                                text: root.folder-saved;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                            Button {
+                                text: "Copy report";
+                                horizontal-stretch: 0;
+                                clicked => { report.copy-all(); }
+                            }
+                        }
+                    }
+                }
+
+                if !root.nag-open && root.message != "": Label {
+                    text: root.message;
+                    font-italic: true;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 16px;
+            alignment: start;
+            Link {
+                text: "Licenses and resale";
+                url: root.licenses-url;
+            }
+            Link {
+                text: "Verify a download";
+                url: root.verify-url;
+            }
+            Link {
+                text: "Contract";
+                url: root.contract-url;
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Palette.border;
+        }
+
+        // The about lines.
+        VerticalLayout {
+            spacing: 2px;
+            Note { text: root.about-line; }
+            Note { text: root.self-check; }
+            if root.device-line != "": Note { text: root.device-line; }
+        }
+    }
+
+    if root.nag-open: Overlay {
+        box-width: 540px;
+        Label {
+            text: "UNREGISTERED COPY";
+            color: root.red;
+            font-size: 20px;
+            font-weight: 700;
+        }
+        Label { text: "BuildDeed Checksum " + root.product-version + " is shareware."; }
+        Label {
+            text: "A license pays the developers and the contributors of this program, turns on the folder check, and removes this screen.";
+        }
+        Label { text: "You can resell your license when you no longer need it."; }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+            Button {
+                text: "Buy a license";
+                primary: true;
+                clicked => { root.buy(); }
+            }
+            if !root.waiting: Button {
+                text: "I have a license";
+                clicked => { root.register(); }
+            }
+            if root.waiting: Button {
+                text: "Stop waiting";
+                clicked => { root.stop-waiting(); }
+            }
+            Button {
+                text: root.continue-label;
+                enabled: root.can-continue;
+                clicked => { root.continue-unregistered(); }
+            }
+        }
+        if root.message != "": Label {
+            text: root.message;
+            font-italic: true;
+        }
+        if root.waiting: HorizontalLayout {
+            spacing: 8px;
+            Spinner {
+                indeterminate: true;
+                width: 20px;
+                height: 20px;
+            }
+            Label {
+                text: "Waiting for the registration...";
+                vertical-alignment: center;
+            }
+        }
+        if root.waiting && root.confirm-code != "": HorizontalLayout {
+            spacing: 8px;
+            Label {
+                text: "If the page asks for a code, enter this one:";
+                vertical-alignment: center;
+            }
+            Label {
+                text: root.confirm-code;
+                font-family: root.mono-font;
+                font-size: 18px;
+                font-weight: 700;
+                horizontal-stretch: 0;
+                wrap: no-wrap;
+            }
+        }
+    }
+
+    if root.about-open: Overlay {
+        box-width: 420px;
+        Label {
+            text: "BuildDeed Checksum " + root.product-version;
+            font-size: 18px;
+            font-weight: 700;
+        }
+        Label { text: "A file checksum tool, sold as shareware with a BuildDeed license on NEAR. Business Source License 1.1."; }
+        Label { text: "The user interface uses Slint:"; }
+        AboutSlint {
+            max-height: 120px;
+        }
+        HorizontalLayout {
+            alignment: end;
+            Button {
+                text: "Close";
+                primary: true;
+                clicked => { root.about-open = false; }
+            }
+        }
+    }
+}

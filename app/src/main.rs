@@ -1,10 +1,14 @@
 //! BuildDeed Checksum: a file checksum tool, sold as shareware with a
 //! BuildDeed license on NEAR.
 //!
-//! - Drop a file: the app shows its SHA-256, and the official build that
-//!   contains the file, if the license contract has a record of it.
-//! - Drop a folder: the folder check compares every file with the last check
-//!   of that folder. This feature needs a license.
+//! - Drop or choose a file: the app shows its SHA-256, and the official
+//!   build that contains the file, if the license contract has a record of it.
+//! - Drop or choose a folder: the folder check compares every file with the
+//!   last check of that folder. This feature needs a license.
+//!
+//! The window is in ui/app.slint (Slint). Background threads send their
+//! results through a channel and then call the window's `messages-arrived`
+//! callback in the event loop.
 //!
 //! Registration: a license has three computer seats. The app shows this
 //! computer's id; the owner registers it on the website (one wallet
@@ -19,9 +23,14 @@
 mod folder;
 mod store;
 
+slint::include_modules!();
+
 use builddeed::{ArtifactMatch, Client, Product, Status};
-use eframe::egui::{self, Color32, RichText};
+use slint::winit_030::{winit::event::WindowEvent, EventResult, WinitWindowAccessor};
+use slint::ComponentHandle;
+use std::cell::RefCell;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
@@ -46,6 +55,14 @@ const POLL_EVERY: Duration = Duration::from_secs(5);
 #[cfg(test)]
 const POLL_EVERY: Duration = Duration::from_millis(50);
 const REGISTER_WAIT: Duration = Duration::from_secs(600);
+/// A monospace font that each system has.
+const MONO_FONT: &str = if cfg!(target_os = "windows") {
+    "Consolas"
+} else if cfg!(target_os = "macos") {
+    "Menlo"
+} else {
+    "DejaVu Sans Mono"
+};
 
 /// The result of a dropped file.
 struct FileCheck {
@@ -62,6 +79,23 @@ enum Msg {
     SelfCheck(String),
 }
 
+/// Sends the results of background threads to the window.
+#[derive(Clone)]
+struct Outbox {
+    tx: Sender<Msg>,
+    ui: slint::Weak<MainWindow>,
+}
+
+impl Outbox {
+    fn send(&self, msg: Msg) {
+        if self.tx.send(msg).is_ok() {
+            let _ = self
+                .ui
+                .upgrade_in_event_loop(|ui| ui.invoke_messages_arrived());
+        }
+    }
+}
+
 #[derive(PartialEq)]
 enum State {
     Checking,
@@ -71,8 +105,9 @@ enum State {
 
 struct App {
     client: Arc<Client>,
-    tx: Sender<Msg>,
+    out: Outbox,
     rx: Receiver<Msg>,
+    ui: slint::Weak<MainWindow>,
     state: State,
     reg: Option<Registration>,
     nag_open: bool,
@@ -89,8 +124,7 @@ struct App {
 }
 
 impl App {
-    fn new(cc: &eframe::CreationContext) -> Self {
-        cc.egui_ctx.set_zoom_factor(1.1);
+    fn new(ui: &MainWindow) -> Self {
         let (tx, rx) = channel();
         let client = Arc::new(Client::new(product()));
         store::remove(OLD_REG_FILE);
@@ -100,8 +134,12 @@ impl App {
             .map_err(|e| e.to_string());
         let mut app = Self {
             client,
-            tx,
+            out: Outbox {
+                tx,
+                ui: ui.as_weak(),
+            },
             rx,
+            ui: ui.as_weak(),
             state: State::Checking,
             reg: None,
             nag_open: true,
@@ -115,13 +153,13 @@ impl App {
             self_check: "Checking this program...".into(),
         };
         match app.device.clone() {
-            Ok(_) => app.spawn_check(cc.egui_ctx.clone()),
+            Ok(_) => app.spawn_check(),
             Err(e) => {
                 app.state = State::Unregistered;
                 app.message = e;
             }
         }
-        app.spawn_self_check(cc.egui_ctx.clone());
+        app.spawn_self_check();
         app
     }
 
@@ -129,18 +167,17 @@ impl App {
     /// license that was sold, or a removed seat, stops working. There is no
     /// offline mode: with no network the app runs unregistered, because a
     /// stored result on this computer could be copied or edited.
-    fn spawn_check(&self, ctx: egui::Context) {
+    fn spawn_check(&self) {
         let client = self.client.clone();
-        let tx = self.tx.clone();
+        let out = self.out.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(Msg::Check(client.status().map_err(|e| e.to_string())));
-            ctx.request_repaint();
+            out.send(Msg::Check(client.status().map_err(|e| e.to_string())));
         });
     }
 
-    fn spawn_self_check(&self, ctx: egui::Context) {
+    fn spawn_self_check(&self) {
         let client = self.client.clone();
-        let tx = self.tx.clone();
+        let out = self.out.clone();
         std::thread::spawn(move || {
             let text = match std::env::current_exe().and_then(|p| builddeed::sha256_file(&p)) {
                 Err(e) => format!("Cannot read this program: {e}"),
@@ -156,14 +193,19 @@ impl App {
                     Err(e) => format!("Cannot check this program now: {e}\nSHA-256 {sha}"),
                 },
             };
-            let _ = tx.send(Msg::SelfCheck(text));
-            ctx.request_repaint();
+            out.send(Msg::SelfCheck(text));
         });
+    }
+
+    fn buy(&mut self) {
+        if let Err(e) = self.client.open_buy_page() {
+            self.message = e.to_string();
+        }
     }
 
     /// Opens the website's register page for this computer, then asks the
     /// contract every few seconds until the computer has a seat.
-    fn start_register(&mut self, ctx: &egui::Context) {
+    fn start_register(&mut self) {
         if let Err(e) = self.client.open_register_page() {
             self.message = e.to_string();
             return;
@@ -172,15 +214,13 @@ impl App {
         let stop = Arc::new(AtomicBool::new(false));
         self.waiting = Some(stop.clone());
         let client = self.client.clone();
-        let tx = self.tx.clone();
-        let ctx = ctx.clone();
+        let out = self.out.clone();
         std::thread::spawn(move || {
             let result = client
                 .wait_for_seat(&stop, POLL_EVERY, REGISTER_WAIT)
                 .map_err(|e| e.to_string());
             if !stop.load(Ordering::Relaxed) {
-                let _ = tx.send(Msg::Registered(result));
-                ctx.request_repaint();
+                out.send(Msg::Registered(result));
             }
         });
     }
@@ -191,23 +231,36 @@ impl App {
         }
     }
 
-    fn on_drop(&mut self, path: PathBuf, ctx: &egui::Context) {
+    /// Opens the nag screen with the "Continue unregistered" button enabled.
+    fn open_nag(&mut self) {
+        self.nag_open = true;
+        self.nag_since = Instant::now() - NAG_WAIT;
+    }
+
+    /// True, with a message and the nag screen, if the folder check is not
+    /// available because this computer has no seat.
+    fn folder_needs_license(&mut self) -> bool {
+        if self.state == State::Registered {
+            return false;
+        }
+        self.message = "The folder check needs a license. Register to use it.".into();
+        self.nag_open = true;
+        true
+    }
+
+    fn on_drop(&mut self, path: PathBuf) {
         if self.busy {
             self.message = "Wait for the current check to finish.".into();
             return;
         }
-        let tx = self.tx.clone();
-        let ctx = ctx.clone();
+        let out = self.out.clone();
         if path.is_dir() {
-            if self.state != State::Registered {
-                self.message = "The folder check needs a license. Register to use it.".into();
-                self.nag_open = true;
+            if self.folder_needs_license() {
                 return;
             }
             self.busy = true;
             std::thread::spawn(move || {
-                let _ = tx.send(Msg::Folder(check_folder(&path)));
-                ctx.request_repaint();
+                out.send(Msg::Folder(check_folder(&path)));
             });
         } else {
             self.busy = true;
@@ -218,12 +271,11 @@ impl App {
                     Ok(s) => client.find_artifact(s).map_err(|e| e.to_string()),
                     Err(_) => Ok(None),
                 };
-                let _ = tx.send(Msg::File(FileCheck {
+                out.send(Msg::File(FileCheck {
                     path,
                     sha256,
                     record,
                 }));
-                ctx.request_repaint();
             });
         }
     }
@@ -276,213 +328,102 @@ impl App {
         self.nag_open = false;
     }
 
-    fn nag(&mut self, ctx: &egui::Context) {
-        let wait_left = NAG_WAIT.saturating_sub(self.nag_since.elapsed());
-        egui::Modal::new(egui::Id::new("nag")).show(ctx, |ui| {
-            ui.set_width(420.0);
-            ui.heading(RichText::new("UNREGISTERED COPY").color(Color32::from_rgb(200, 40, 40)).strong());
-            ui.add_space(6.0);
-            ui.label(format!("{PRODUCT} {VERSION} is shareware."));
-            ui.label("A license pays the developers and the contributors of this program, turns on the folder check, and removes this screen.");
-            ui.label("You can resell your license when you no longer need it.");
-            ui.add_space(10.0);
-            ui.horizontal(|ui| {
-                if ui.button("Buy a license").clicked() {
-                    if let Err(e) = self.client.open_buy_page() {
-                        self.message = e.to_string();
-                    }
-                }
-                if self.waiting.is_some() {
-                    if ui.button("Stop waiting").clicked() {
-                        self.stop_waiting();
-                        self.message.clear();
-                    }
-                } else if ui.button("I have a license").clicked() {
-                    self.start_register(ctx);
-                }
-                let label = if wait_left.is_zero() {
-                    "Continue unregistered".to_string()
-                } else {
-                    format!("Continue unregistered ({})", wait_left.as_secs() + 1)
-                };
-                if ui.add_enabled(wait_left.is_zero(), egui::Button::new(label)).clicked() {
-                    self.nag_open = false;
-                }
-            });
-            if !self.message.is_empty() {
-                ui.add_space(8.0);
-                ui.label(RichText::new(&self.message).italics());
-            }
-            if self.waiting.is_some() {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label("Waiting for the registration...");
-                });
-                if let Ok(code) = self.client.confirm_code() {
-                    ui.horizontal(|ui| {
-                        ui.label("If the page asks for a code, enter this one:");
-                        ui.label(RichText::new(code).monospace().strong().size(18.0));
-                    });
-                }
-            }
-        });
-        if !wait_left.is_zero() {
-            ctx.request_repaint_after(Duration::from_millis(250));
-        }
+    /// Seconds until "Continue unregistered" is enabled; zero when it is.
+    fn wait_left(&self) -> Duration {
+        NAG_WAIT.saturating_sub(self.nag_since.elapsed())
     }
-}
 
-impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.handle_messages();
-
-        let dropped: Vec<PathBuf> = ctx.input(|i| {
-            i.raw
-                .dropped_files
-                .iter()
-                .filter_map(|f| f.path.clone())
-                .collect()
+    /// Sets the countdown of the "Continue unregistered" button.
+    fn show_countdown(&self, ui: &MainWindow) {
+        let left = self.wait_left();
+        ui.set_can_continue(left.is_zero());
+        ui.set_continue_label(if left.is_zero() {
+            "Continue unregistered".into()
+        } else {
+            format!("Continue unregistered ({})", left.as_secs() + 1).into()
         });
-        if let Some(p) = dropped.into_iter().next() {
-            self.on_drop(p, ctx);
+    }
+
+    /// Copies the state of the app to the window.
+    fn show(&self) {
+        let Some(ui) = self.ui.upgrade() else {
+            return;
+        };
+        ui.set_app_state(match self.state {
+            State::Checking => AppState::Checking,
+            State::Registered => AppState::Registered,
+            State::Unregistered => AppState::Unregistered,
+        });
+        ui.set_registered_text(
+            self.reg
+                .as_ref()
+                .map(|r| {
+                    format!(
+                        "Registered to {}, updates until {}",
+                        r.account_id,
+                        date(r.updates_until_ms)
+                    )
+                })
+                .unwrap_or_default()
+                .into(),
+        );
+        ui.set_nag_open(self.nag_open && self.state != State::Checking);
+        self.show_countdown(&ui);
+        ui.set_waiting(self.waiting.is_some());
+        ui.set_confirm_code(self.client.confirm_code().unwrap_or_default().into());
+        ui.set_message(self.message.as_str().into());
+        ui.set_busy(self.busy);
+
+        ui.set_file_shown(self.file.is_some());
+        if let Some(f) = &self.file {
+            ui.set_file_path(f.path.display().to_string().into());
+            let (sha, error) = match &f.sha256 {
+                Ok(s) => (s.clone(), String::new()),
+                Err(e) => (String::new(), format!("Cannot read the file: {e}")),
+            };
+            ui.set_file_sha(sha.into());
+            ui.set_file_error(error.into());
+            let (text, official, url) = match &f.record {
+                Ok(Some(m)) => (
+                    format!(
+                        "Official build {} for {}, commit {}, released {}.",
+                        m.version,
+                        m.artifact.platform,
+                        m.commit,
+                        date(m.released_at_ms)
+                    ),
+                    true,
+                    m.artifact.attestation_url.clone().unwrap_or_default(),
+                ),
+                Ok(None) if f.sha256.is_ok() => (
+                    "The license contract has no record of this file.".into(),
+                    false,
+                    String::new(),
+                ),
+                Ok(None) => (String::new(), false, String::new()),
+                Err(e) => (
+                    format!("Cannot look up the record: {e}"),
+                    false,
+                    String::new(),
+                ),
+            };
+            ui.set_record_text(text.into());
+            ui.set_record_official(official);
+            ui.set_attestation_url(url.into());
         }
 
-        egui::TopBottomPanel::top("status").show(ctx, |ui| {
-            ui.horizontal(|ui| match (&self.state, &self.reg) {
-                (State::Registered, Some(r)) => {
-                    ui.label(
-                        RichText::new(format!(
-                            "Registered to {}, updates until {}",
-                            r.account_id,
-                            date(r.updates_until_ms)
-                        ))
-                        .color(Color32::from_rgb(30, 140, 60))
-                        .strong(),
-                    );
-                }
-                (State::Checking, _) => {
-                    ui.label("Checking the license...");
-                }
-                _ => {
-                    ui.label(
-                        RichText::new("UNREGISTERED")
-                            .color(Color32::from_rgb(200, 40, 40))
-                            .strong(),
-                    );
-                    if ui.small_button("Register").clicked() {
-                        self.nag_open = true;
-                        self.nag_since = Instant::now() - NAG_WAIT;
-                    }
-                }
-            });
-        });
-
-        egui::TopBottomPanel::bottom("about").show(ctx, |ui| {
-            ui.small(format!(
-                "{PRODUCT} {VERSION}. License contract {CONTRACT} on NEAR testnet."
-            ));
-            ui.small(&self.self_check);
-            if let Ok(d) = self.client.short_device_id() {
-                ui.small(format!("This computer: {d}"));
+        ui.set_folder_shown(self.folder.is_some());
+        match &self.folder {
+            Some(Ok((report, saved))) => {
+                ui.set_folder_report(report.as_str().into());
+                ui.set_folder_saved(format!("Report saved to {}", saved.display()).into());
+                ui.set_folder_error("".into());
             }
-        });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading(PRODUCT);
-            ui.label(
-                "Drop a file on this window to see its SHA-256 and its official build record.",
-            );
-            ui.label(if self.state == State::Registered {
-                "Drop a folder to check it against its last check."
-            } else {
-                "Drop a folder to check it against its last check (needs a license)."
-            });
-            if self.busy {
-                ui.spinner();
-            }
-            if let Some(FileCheck {
-                path,
-                sha256: sha,
-                record,
-            }) = &self.file
-            {
-                ui.separator();
-                ui.label(RichText::new(path.display().to_string()).strong());
-                match sha {
-                    Ok(s) => {
-                        ui.horizontal(|ui| {
-                            ui.monospace(s);
-                            if ui.small_button("Copy").clicked() {
-                                ui.ctx().copy_text(s.clone());
-                            }
-                        });
-                    }
-                    Err(e) => {
-                        ui.label(format!("Cannot read the file: {e}"));
-                    }
-                }
-                match record {
-                    Ok(Some(m)) => {
-                        ui.label(
-                            RichText::new(format!(
-                                "Official build {} for {}, commit {}, released {}.",
-                                m.version,
-                                m.artifact.platform,
-                                m.commit,
-                                date(m.released_at_ms)
-                            ))
-                            .color(Color32::from_rgb(30, 140, 60)),
-                        );
-                        if let Some(url) = &m.artifact.attestation_url {
-                            ui.hyperlink_to("Build attestation", url);
-                        }
-                    }
-                    Ok(None) => {
-                        if sha.is_ok() {
-                            ui.label("The license contract has no record of this file.");
-                        }
-                    }
-                    Err(e) => {
-                        ui.label(format!("Cannot look up the record: {e}"));
-                    }
-                }
-            }
-            if let Some(result) = &self.folder {
-                ui.separator();
-                match result {
-                    Ok((report, saved)) => {
-                        egui::ScrollArea::vertical()
-                            .max_height(260.0)
-                            .show(ui, |ui| {
-                                ui.monospace(report);
-                            });
-                        ui.horizontal(|ui| {
-                            ui.label(format!("Report saved to {}", saved.display()));
-                            if ui.small_button("Copy report").clicked() {
-                                ui.ctx().copy_text(report.clone());
-                            }
-                        });
-                    }
-                    Err(e) => {
-                        ui.label(format!("Folder check failed: {e}"));
-                    }
-                }
-            }
-            if !self.nag_open && !self.message.is_empty() {
-                ui.separator();
-                ui.label(RichText::new(&self.message).italics());
-            }
-            ui.add_space(12.0);
-            ui.horizontal(|ui| {
-                ui.hyperlink_to("Licenses and resale", format!("{SITE_URL}/licenses.html"));
-                ui.hyperlink_to("Verify a download", format!("{SITE_URL}/verify.html"));
-                ui.hyperlink_to("Contract", format!("{EXPLORER}/{CONTRACT}"));
-            });
-        });
-
-        if self.nag_open && self.state != State::Checking {
-            self.nag(ctx);
+            Some(Err(e)) => ui.set_folder_error(format!("Folder check failed: {e}").into()),
+            None => {}
         }
+
+        ui.set_self_check(self.self_check.as_str().into());
     }
 }
 
@@ -529,15 +470,111 @@ fn date(ms: u64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
-fn main() -> eframe::Result {
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title(PRODUCT)
-            .with_inner_size([720.0, 520.0])
-            .with_drag_and_drop(true),
-        ..Default::default()
+fn main() -> Result<(), slint::PlatformError> {
+    let ui = MainWindow::new()?;
+    ui.set_mono_font(MONO_FONT.into());
+    ui.set_product_version(VERSION.into());
+    ui.set_about_line(
+        format!("{PRODUCT} {VERSION}. License contract {CONTRACT} on NEAR testnet.").into(),
+    );
+    ui.set_licenses_url(format!("{SITE_URL}/licenses.html").into());
+    ui.set_verify_url(format!("{SITE_URL}/verify.html").into());
+    ui.set_contract_url(format!("{EXPLORER}/{CONTRACT}").into());
+
+    let app = Rc::new(RefCell::new(App::new(&ui)));
+    if let Ok(d) = app.borrow().client.short_device_id() {
+        ui.set_device_line(format!("This computer: {d}").into());
+    }
+    app.borrow().show();
+
+    // Each handler changes the app, then copies its state to the window.
+    let on = |f: fn(&mut App)| {
+        let app = app.clone();
+        move || {
+            let mut a = app.borrow_mut();
+            f(&mut a);
+            a.show();
+        }
     };
-    eframe::run_native(PRODUCT, options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
+    ui.on_messages_arrived(on(App::handle_messages));
+    ui.on_buy(on(App::buy));
+    ui.on_register(on(App::start_register));
+    ui.on_stop_waiting(on(|a| {
+        a.stop_waiting();
+        a.message.clear();
+    }));
+    ui.on_continue_unregistered(on(|a| a.nag_open = false));
+    ui.on_open_nag(on(App::open_nag));
+    ui.on_choose_file({
+        let (app, ui) = (app.clone(), ui.as_weak());
+        move || pick(&app, &ui, false)
+    });
+    ui.on_choose_folder({
+        let (app, ui) = (app.clone(), ui.as_weak());
+        move || pick(&app, &ui, true)
+    });
+
+    // Drag and drop. Slint has no event for dropped files, so the app reads
+    // the winit events of the window. winit has no drag and drop on Wayland.
+    ui.window().on_winit_window_event({
+        let (app, weak) = (app.clone(), ui.as_weak());
+        move |_, event| match event {
+            WindowEvent::DroppedFile(path) => {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_drop_hover(false);
+                }
+                let mut a = app.borrow_mut();
+                a.on_drop(path.clone());
+                a.show();
+                EventResult::PreventDefault
+            }
+            WindowEvent::HoveredFile(_) | WindowEvent::HoveredFileCancelled => {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_drop_hover(matches!(event, WindowEvent::HoveredFile(_)));
+                }
+                EventResult::PreventDefault
+            }
+            _ => EventResult::Propagate,
+        }
+    });
+
+    // The countdown of the nag screen.
+    let countdown = slint::Timer::default();
+    countdown.start(slint::TimerMode::Repeated, Duration::from_millis(250), {
+        let (app, ui) = (app.clone(), ui.as_weak());
+        move || {
+            if let Some(ui) = ui.upgrade() {
+                app.borrow().show_countdown(&ui);
+            }
+        }
+    });
+
+    ui.run()
+}
+
+/// Shows the system's file or folder dialog, then checks the chosen path.
+fn pick(app: &Rc<RefCell<App>>, ui: &slint::Weak<MainWindow>, folder: bool) {
+    let Some(ui) = ui.upgrade() else {
+        return;
+    };
+    if folder && app.borrow_mut().folder_needs_license() {
+        app.borrow().show();
+        return;
+    }
+    let dialog = rfd::AsyncFileDialog::new().set_parent(&ui.window().window_handle());
+    let app = app.clone();
+    let _ = slint::spawn_local(async move {
+        let picked = if folder {
+            dialog.set_title("Check a folder").pick_folder().await
+        } else {
+            dialog.set_title("Choose a file").pick_file().await
+        };
+        if let Some(handle) = picked {
+            let mut a = app.borrow_mut();
+            a.on_drop(handle.path().to_path_buf());
+            a.show();
+        }
+    });
 }
 
 #[cfg(test)]
