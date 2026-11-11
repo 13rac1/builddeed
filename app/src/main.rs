@@ -26,6 +26,7 @@ mod store;
 slint::include_modules!();
 
 use builddeed::{ArtifactMatch, Client, Product, Status};
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::winit_030::{winit::event::WindowEvent, EventResult, WinitWindowAccessor};
 use slint::ComponentHandle;
 use std::cell::RefCell;
@@ -515,10 +516,23 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     // Drag and drop. Slint has no event for dropped files, so the app reads
-    // the winit events of the window. winit has no drag and drop on Wayland.
+    // the winit events of the window. winit has no drag and drop on Wayland:
+    // there the window tells the user to choose the file.
     ui.window().on_winit_window_event({
         let (app, weak) = (app.clone(), ui.as_weak());
-        move |_, event| match event {
+        let mut wayland_checked = false;
+        move |w, event| match event {
+            _ if !wayland_checked => {
+                wayland_checked = true;
+                let wayland = matches!(
+                    w.window_handle().window_handle().map(|h| h.as_raw()),
+                    Ok(RawWindowHandle::Wayland(_))
+                );
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_can_drop(!wayland);
+                }
+                EventResult::Propagate
+            }
             WindowEvent::DroppedFile(path) => {
                 if let Some(ui) = weak.upgrade() {
                     ui.set_drop_hover(false);

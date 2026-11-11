@@ -14,6 +14,7 @@ builddeed = { git = "https://github.com/13rac1/builddeed-sdk", rev = "b137b8740f
 slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software", "accessibility", "raw-window-handle-06", "unstable-winit-030"] }
 # Native file and folder dialogs. On Linux: the XDG desktop portal, not GTK.
 rfd = { version = "0.18", default-features = false, features = ["xdg-portal"] }
+raw-window-handle = "0.6"
 sha2 = "0.10"
 hex = "0.4"
 serde = { version = "1", features = ["derive"] }

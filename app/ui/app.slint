@@ -87,6 +87,8 @@ export component MainWindow inherits Window {
 
     in property <bool> busy;
     in property <bool> drop-hover;
+    // False on Wayland, where winit gets no dropped files.
+    in property <bool> can-drop: true;
 
     // The last file.
     in property <bool> file-shown;
@@ -211,12 +213,13 @@ export component MainWindow inherits Window {
                 padding: 14px;
                 spacing: 8px;
                 Label {
-                    text: "Drop a file on this window to see its SHA-256 and its official build record.";
+                    text: (root.can-drop ? "Drop a file on this window or choose it" : "Choose a file")
+                        + " to see its SHA-256 and its official build record.";
                 }
                 Label {
-                    text: root.app-state == AppState.registered
-                        ? "Drop a folder to check it against its last check."
-                        : "Drop a folder to check it against its last check (needs a license).";
+                    text: (root.can-drop ? "Drop a folder or choose it" : "Choose a folder")
+                        + " to check it against its last check"
+                        + (root.app-state == AppState.registered ? "." : " (needs a license).");
                 }
                 HorizontalLayout {
                     spacing: 8px;
@@ -425,6 +428,8 @@ export component MainWindow inherits Window {
             Label {
                 text: "If the page asks for a code, enter this one:";
                 vertical-alignment: center;
+                horizontal-stretch: 0;
+                wrap: no-wrap;
             }
             Label {
                 text: root.confirm-code;
@@ -434,6 +439,7 @@ export component MainWindow inherits Window {
                 horizontal-stretch: 0;
                 wrap: no-wrap;
             }
+            Rectangle { horizontal-stretch: 1; }
         }
     }
 

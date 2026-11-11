@@ -579,6 +579,7 @@ dependencies = [
  "builddeed",
  "fontique",
  "hex",
+ "raw-window-handle",
  "rfd",
  "serde",
  "serde_json",
