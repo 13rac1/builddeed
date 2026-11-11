@@ -9,6 +9,7 @@ build of a program. Anyone can read the code and build it.
 - Website (testnet demo): https://13rac1.github.io/builddeed/
 - License contract: [`licenses.builddeed.testnet`](https://testnet.nearblocks.io/address/licenses.builddeed.testnet): one contract and one NFT collection for every product
 - Downloads: [GitHub releases](https://github.com/13rac1/builddeed/releases/latest)
+- For AI agents: [agents.md](https://13rac1.github.io/builddeed/agents.md) (buy, register and download with the `builddeed` CLI)
 - Built at NEAR HACKATHON 2026, track `nfts` ("NFTs That Do Something").
 
 ## The problem
@@ -124,7 +125,7 @@ The hackathon release has no Apple or Windows code signature.
 | Products | One contract holds every product. A developer calls `add_product` with the key, name, prices, update period, royalty, payees and seats per license, and pays only for the storage of the record. Token ids are `<product>:<number>`, for example `doom:1`. |
 | Computer seats | `add_device` (owner only, storage paid by the owner), `remove_device`, `device_license(product, device_id, version)`. Three seats for each license; a resale clears them. The app reads its seat with a view call, so registration needs no license server and no callback to the app. |
 | Build record | `add_build` (append-only, per product), `find_artifact`, `get_builds`. The storage of a record comes from the product's storage balance (`add_storage`), because a function-call key cannot attach NEAR. |
-| Agent budget | `deposit_budget` (full-access key), then a function-call key of the owner can call `buy_from_budget` and `add_device_from_budget`: an agent buys and registers with no browser and cannot sell. `withdraw_budget` returns the rest. |
+| Agent budget | `deposit_budget` (full-access key) with a highest price and a list of products, then a function-call key of the owner can call `buy_from_budget` (with the price it read) and `add_device_from_budget`: an agent buys and registers with no browser and cannot sell. `withdraw_budget` returns the rest. |
 | Download links | Each recorded file has its download URL; `latest_build(product, platform)` gives the newest one. |
 | Release key | A function-call access key of the developer account that can call only `add_build` on the license contract. The release workflow holds it, not a full-access key. |
 
@@ -145,7 +146,7 @@ You need Podman.
 
 ```sh
 scripts/check.sh             # everything below, with rustfmt and clippy
-scripts/contract.sh test     # contract: 103 unit tests and the sandbox test
+scripts/contract.sh test     # contract: 108 unit tests and the sandbox test
 scripts/app.sh test          # app: 4 tests (seat check against a local fake RPC)
 scripts/app.sh linux         # app/target/x86_64-unknown-linux-gnu/release/builddeed-checksum
 scripts/app.sh windows       # app/target/x86_64-pc-windows-gnu/release/builddeed-checksum.exe
@@ -157,7 +158,7 @@ The website: `cd site && npm ci && npm run build` (Node 24).
 ### Deployed contract
 
 The contract on `licenses.builddeed.testnet` has the code hash
-`f233b7aff1779c9f6ba7113467f272909d17bbb0813172078c1c5319ce90d147`.
+`5236c5b8227357c52d7e41dda10ac1df52f351763bd766ccaad932f6ad305c27`.
 `scripts/contract.sh build` prints the same SHA-256.
 
 ## Trust model and limits

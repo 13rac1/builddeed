@@ -1514,100 +1514,6 @@ fn latest_build_takes_files_added_to_a_version_in_its_first_day() {
     );
 }
 
-// ----- Agent budget -----
-
-fn budget(c: &Contract, who: &str) -> Budget {
-    c.get_budget(acc(who)).expect("budget")
-}
-
-/// Alice deposits `deposit` into her budget. She allows `products` (empty:
-/// all) and prices up to 5 NEAR.
-fn deposit(c: &mut Contract, deposit: NearToken, products: &[&str]) -> Budget {
-    call("alice.near", deposit, 10_000);
-    c.deposit_budget(near(5), products.iter().map(|p| p.to_string()).collect())
-}
-
-#[test]
-#[should_panic(expected = "Attach at least 1 yoctoNEAR")]
-fn deposit_budget_refuses_a_zero_deposit() {
-    let mut c = setup();
-    deposit(&mut c, yocto(0), &[]);
-}
-
-#[test]
-#[should_panic(expected = "No product has this key")]
-fn deposit_budget_refuses_an_unknown_product() {
-    let mut c = setup();
-    deposit(&mut c, near(10), &[P, "nothing"]);
-}
-
-#[test]
-#[should_panic(expected = "Give at most 16 products")]
-fn deposit_budget_refuses_17_products() {
-    let mut c = setup();
-    deposit(&mut c, near(10), &[P; 17]);
-}
-
-#[test]
-#[should_panic(expected = "The deposit does not cover the storage of the budget")]
-fn deposit_budget_refuses_a_deposit_below_the_record_cost() {
-    let mut c = setup();
-    deposit(&mut c, yocto(1), &[]);
-}
-
-#[test]
-fn deposit_budget_sets_the_limits_and_keeps_the_rest_as_balance() {
-    let mut c = setup_two();
-    assert!(c.get_budget(acc("alice.near")).is_none());
-    call("alice.near", near(10), 10_000);
-    let before = env::storage_usage();
-    let b = c.deposit_budget(near(4), vec![P.into()]);
-    let record = cost_since(before);
-    assert!(record > 0);
-    assert_eq!(b.balance.as_yoctonear(), near(10).as_yoctonear() - record);
-    assert_eq!(b.max_price, near(4));
-    assert_eq!(b.products, vec![P]);
-    assert_eq!(budget(&c, "alice.near"), b);
-}
-
-#[test]
-fn a_second_deposit_adds_to_the_balance_and_replaces_the_limits() {
-    let mut c = setup_two();
-    let first = deposit(&mut c, near(10), &[P]).balance.as_yoctonear();
-    // The record keeps its size: all of the deposit goes to the balance.
-    call("alice.near", near(2), 10_000);
-    let b = c.deposit_budget(near(3), vec![P.into()]);
-    assert_eq!(b.balance.as_yoctonear(), first + near(2).as_yoctonear());
-    assert_eq!(b.max_price, near(3));
-    // A longer product list: the deposit pays the added storage first.
-    call("alice.near", near(1), 10_000);
-    let before = env::storage_usage();
-    let b = c.deposit_budget(near(2), vec![P.into(), Q.into()]);
-    let grown = cost_since(before);
-    assert!(grown > 0);
-    assert_eq!(
-        b.balance.as_yoctonear(),
-        first + near(3).as_yoctonear() - grown
-    );
-    assert_eq!(b.max_price, near(2));
-    assert_eq!(b.products, vec![P, Q]);
-    // An empty list allows all products.
-    call("alice.near", near(1), 10_000);
-    let b = c.deposit_budget(near(5), vec![]);
-    assert!(b.products.is_empty());
-    assert_eq!(budget(&c, "alice.near"), b);
-}
-
-#[test]
-fn buy_from_budget_refuses_without_a_budget() {
-    let mut c = setup();
-    call("alice.near", yocto(0), 10_000);
-    let msg = panic_text(|| {
-        c.buy_from_budget(P.into());
-    });
-    assert!(msg.contains("This account has no agent budget"), "{msg}");
-}
-
 // ----- Isolation between products -----
 
 /// A call that changes a contract.
@@ -1927,15 +1833,152 @@ fn views_refuse_oversized_inputs() {
     );
 }
 
+// ----- Agent budget -----
+
+fn budget(c: &Contract, who: &str) -> Budget {
+    c.get_budget(acc(who)).expect("budget")
+}
+
+/// Alice deposits `deposit` into her budget. She allows `products` and
+/// prices up to 5 NEAR.
+fn deposit(c: &mut Contract, deposit: NearToken, products: &[&str]) -> Budget {
+    call("alice.near", deposit, 10_000);
+    c.deposit_budget(near(5), products.iter().map(|p| p.to_string()).collect())
+}
+
+/// `who` buys a license of `product` from the budget, at the price that
+/// the product has now.
+fn buy_from_budget(c: &mut Contract, who: &str, product: &str) -> LicenseView {
+    let price = c.get_product(product.into()).expect("product").price;
+    call(who, yocto(0), 10_000);
+    c.buy_from_budget(product.into(), price)
+}
+
+#[test]
+#[should_panic(expected = "Attach at least 1 yoctoNEAR")]
+fn deposit_budget_refuses_a_zero_deposit() {
+    let mut c = setup();
+    deposit(&mut c, yocto(0), &[P]);
+}
+
+#[test]
+#[should_panic(expected = "No product has this key")]
+fn deposit_budget_refuses_an_unknown_product() {
+    let mut c = setup();
+    deposit(&mut c, near(10), &[P, "nothing"]);
+}
+
+#[test]
+#[should_panic(expected = "Give 1 to 16 products")]
+fn deposit_budget_refuses_an_empty_product_list() {
+    let mut c = setup();
+    deposit(&mut c, near(10), &[]);
+}
+
+#[test]
+#[should_panic(expected = "Give 1 to 16 products")]
+fn deposit_budget_refuses_17_products() {
+    let mut c = setup();
+    deposit(&mut c, near(10), &[P; 17]);
+}
+
+#[test]
+fn deposit_budget_accepts_16_products() {
+    let mut c = setup();
+    let b = deposit(&mut c, near(10), &[P; 16]);
+    assert_eq!(b.products.len(), 16);
+}
+
+#[test]
+#[should_panic(expected = "The deposit does not cover the storage of the budget")]
+fn deposit_budget_refuses_a_deposit_below_the_record_cost() {
+    let mut c = setup();
+    deposit(&mut c, yocto(1), &[P]);
+}
+
+#[test]
+fn deposit_budget_sets_the_limits_and_keeps_the_rest_as_balance() {
+    let mut c = setup_two();
+    assert!(c.get_budget(acc("alice.near")).is_none());
+    call("alice.near", near(10), 10_000);
+    let before = env::storage_usage();
+    let b = c.deposit_budget(near(4), vec![P.into()]);
+    let record = cost_since(before);
+    assert!(record > 0);
+    assert_eq!(b.balance.as_yoctonear(), near(10).as_yoctonear() - record);
+    assert_eq!(b.max_price, near(4));
+    assert_eq!(b.products, vec![P]);
+    assert_eq!(budget(&c, "alice.near"), b);
+}
+
+#[test]
+fn a_second_deposit_adds_to_the_balance_and_replaces_the_limits() {
+    let mut c = setup_two();
+    let first = deposit(&mut c, near(10), &[P]).balance.as_yoctonear();
+    // The record keeps its size: all of the deposit goes to the balance.
+    call("alice.near", near(2), 10_000);
+    let b = c.deposit_budget(near(3), vec![P.into()]);
+    assert_eq!(b.balance.as_yoctonear(), first + near(2).as_yoctonear());
+    assert_eq!(b.max_price, near(3));
+    // A longer product list: the deposit pays the added storage first.
+    call("alice.near", near(1), 10_000);
+    let before = env::storage_usage();
+    let b = c.deposit_budget(near(2), vec![P.into(), Q.into()]);
+    let grown = cost_since(before);
+    assert!(grown > 0);
+    let second = first + near(3).as_yoctonear() - grown;
+    assert_eq!(b.balance.as_yoctonear(), second);
+    assert_eq!(b.max_price, near(2));
+    assert_eq!(b.products, vec![P, Q]);
+    // A shorter product list: the freed storage goes to the balance.
+    call("alice.near", near(1), 10_000);
+    let before = env::storage_usage();
+    let b = c.deposit_budget(near(5), vec![Q.into()]);
+    let after = env::storage_usage();
+    assert!(after < before);
+    let freed = u128::from(before - after) * env::storage_byte_cost().as_yoctonear();
+    assert_eq!(
+        b.balance.as_yoctonear(),
+        second + near(1).as_yoctonear() + freed
+    );
+    assert_eq!(b.products, vec![Q]);
+    assert_eq!(budget(&c, "alice.near"), b);
+}
+
+#[test]
+fn buy_from_budget_refuses_without_a_budget() {
+    let mut c = setup();
+    let msg = panic_text(|| {
+        buy_from_budget(&mut c, "alice.near", P);
+    });
+    assert!(msg.contains("This account has no agent budget"), "{msg}");
+}
+
 #[test]
 fn buy_from_budget_refuses_a_product_outside_the_list() {
     let mut c = setup_two();
     deposit(&mut c, near(10), &[Q]);
-    call("alice.near", yocto(0), 10_000);
     let msg = panic_text(|| {
-        c.buy_from_budget(P.into());
+        buy_from_budget(&mut c, "alice.near", P);
     });
     assert!(msg.contains("does not allow this product"), "{msg}");
+}
+
+#[test]
+fn buy_from_budget_refuses_a_product_added_after_the_deposit() {
+    let mut c = setup();
+    let start = deposit(&mut c, near(20), &[P]);
+    // A third account adds a product at the highest price of the budget.
+    let mut t = terms2();
+    t.price = start.max_price;
+    call("dev3.near", near(1), 10_000);
+    c.add_product("late".into(), t);
+    let msg = panic_text(|| {
+        buy_from_budget(&mut c, "alice.near", "late");
+    });
+    assert!(msg.contains("does not allow this product"), "{msg}");
+    assert_eq!(budget(&c, "alice.near"), start);
+    assert_eq!(c.get_product("late".into()).unwrap().licenses_sold, 0);
 }
 
 #[test]
@@ -1944,23 +1987,49 @@ fn buy_from_budget_refuses_a_price_above_max_price() {
     call("alice.near", near(10), 10_000);
     c.deposit_budget(
         NearToken::from_yoctonear(near(5).as_yoctonear() - 1),
-        vec![],
+        vec![P.into()],
     );
-    call("alice.near", yocto(0), 10_000);
     let msg = panic_text(|| {
-        c.buy_from_budget(P.into());
+        buy_from_budget(&mut c, "alice.near", P);
     });
     assert!(msg.contains("more than the highest price"), "{msg}");
+}
+
+#[test]
+fn buy_from_budget_refuses_a_changed_price() {
+    let mut c = setup();
+    call("alice.near", near(20), 10_000);
+    let start = c.deposit_budget(near(10), vec![P.into()]);
+    // The agent reads the price, then the developer changes it.
+    let seen = c.get_product(P.into()).unwrap().price;
+    call("dev.near", yocto(0), 10_000);
+    c.set_prices(P.into(), near(6), near(2));
+    call("alice.near", yocto(0), 10_000);
+    let msg = panic_text(|| {
+        c.buy_from_budget(P.into(), seen);
+    });
+    assert!(
+        msg.contains("The price changed. Read the product again"),
+        "{msg}"
+    );
+    assert_eq!(budget(&c, "alice.near"), start);
+    assert!(c.licenses_for_owner(acc("alice.near"), None).is_empty());
+    // At the new price, the buy goes through.
+    let l = buy_from_budget(&mut c, "alice.near", P);
+    assert_eq!(l.token_id, T1);
+    assert_eq!(
+        budget(&c, "alice.near").balance.as_yoctonear(),
+        start.balance.as_yoctonear() - near(6).as_yoctonear()
+    );
 }
 
 #[test]
 fn buy_from_budget_refuses_a_low_balance() {
     let mut c = setup();
     // The balance is 5 NEAR less the record cost: below the price.
-    deposit(&mut c, near(5), &[]);
-    call("alice.near", yocto(0), 10_000);
+    deposit(&mut c, near(5), &[P]);
     let msg = panic_text(|| {
-        c.buy_from_budget(P.into());
+        buy_from_budget(&mut c, "alice.near", P);
     });
     assert!(msg.contains("The agent budget is too low"), "{msg}");
 }
@@ -1971,7 +2040,7 @@ fn buy_from_budget_takes_the_price_and_pays_as_buy() {
     let start = deposit(&mut c, near(20), &[P]).balance.as_yoctonear();
     call("alice.near", yocto(0), 10_000);
     let before = env::storage_usage();
-    let l = c.buy_from_budget(P.into());
+    let l = c.buy_from_budget(P.into(), near(5));
     let storage = cost_since(before);
     let paid = transfers();
     assert_eq!(
@@ -2002,9 +2071,8 @@ fn buy_from_budget_takes_the_price_and_pays_as_buy() {
 #[test]
 fn add_device_from_budget_takes_the_seat_storage() {
     let mut c = setup();
-    deposit(&mut c, near(20), &[]);
-    call("alice.near", yocto(0), 10_000);
-    c.buy_from_budget(P.into());
+    deposit(&mut c, near(20), &[P]);
+    buy_from_budget(&mut c, "alice.near", P);
     let start = budget(&c, "alice.near").balance.as_yoctonear();
     call("alice.near", yocto(0), 20_000);
     let before = env::storage_usage();
@@ -2026,10 +2094,26 @@ fn add_device_from_budget_takes_the_seat_storage() {
 }
 
 #[test]
+fn add_device_from_budget_refuses_a_product_outside_the_list() {
+    let mut c = setup_two();
+    // Alice owns T1 of product P, and her budget allows Q only.
+    call("alice.near", near(5), 10_000);
+    c.buy(P.into());
+    let start = deposit(&mut c, near(1), &[Q]);
+    call("alice.near", yocto(0), 20_000);
+    let msg = panic_text(|| {
+        c.add_device_from_budget(T1.into(), dev('a'));
+    });
+    assert!(msg.contains("does not allow this product"), "{msg}");
+    assert_eq!(budget(&c, "alice.near"), start);
+    assert!(c.get_license(T1.into()).unwrap().devices.is_empty());
+}
+
+#[test]
 fn add_device_from_budget_refuses_a_non_owner() {
     let mut c = with_license();
     call("bob.near", near(1), 10_000);
-    c.deposit_budget(near(5), vec![]);
+    c.deposit_budget(near(5), vec![P.into()]);
     call("bob.near", yocto(0), 20_000);
     let msg = panic_text(|| {
         c.add_device_from_budget(T1.into(), dev('a'));
@@ -2040,7 +2124,7 @@ fn add_device_from_budget_refuses_a_non_owner() {
 #[test]
 fn add_device_from_budget_refuses_a_low_balance() {
     let mut c = with_license();
-    let b = deposit(&mut c, near(1), &[]);
+    let b = deposit(&mut c, near(1), &[P]);
     // Leave 1 yoctoNEAR in the budget.
     call("alice.near", yocto(YOCTO), 10_000);
     c.withdraw_budget(Some(yocto(b.balance.as_yoctonear() - 1)));
@@ -2065,9 +2149,9 @@ fn add_device_from_budget_refuses_without_a_budget() {
 #[test]
 fn withdraw_budget_pays_the_amount_to_the_owner() {
     let mut c = setup();
-    let start = deposit(&mut c, near(10), &[]).balance.as_yoctonear();
+    let start = deposit(&mut c, near(10), &[P]).balance.as_yoctonear();
     call("alice.near", yocto(YOCTO), 10_000);
-    let b = c.withdraw_budget(Some(near(3)));
+    let b = c.withdraw_budget(Some(near(3))).expect("the budget stays");
     assert_eq!(b.balance.as_yoctonear(), start - near(3).as_yoctonear());
     let paid = transfers();
     assert_eq!(paid, vec![(acc("alice.near"), near(3).as_yoctonear())]);
@@ -2075,24 +2159,38 @@ fn withdraw_budget_pays_the_amount_to_the_owner() {
 }
 
 #[test]
-fn withdraw_budget_without_an_amount_pays_all() {
+fn withdraw_budget_without_an_amount_pays_all_and_the_record_storage() {
     let mut c = setup();
-    let start = deposit(&mut c, near(10), &[]).balance.as_yoctonear();
+    call("alice.near", near(10), 10_000);
+    let before = env::storage_usage();
+    let start = c
+        .deposit_budget(near(5), vec![P.into()])
+        .balance
+        .as_yoctonear();
+    let record = cost_since(before);
     call("alice.near", yocto(YOCTO), 10_000);
-    let b = c.withdraw_budget(None);
-    assert_eq!(b.balance, yocto(0));
-    assert_eq!(transfers(), vec![(acc("alice.near"), start)]);
-    // The limits stay.
-    assert_eq!(b.max_price, near(5));
+    let before = env::storage_usage();
+    assert!(c.withdraw_budget(None).is_none());
+    let after = env::storage_usage();
+    let freed = u128::from(before - after) * env::storage_byte_cost().as_yoctonear();
+    assert_eq!(freed, record, "the whole record is freed");
+    assert_eq!(transfers(), vec![(acc("alice.near"), start + freed)]);
+    assert_eq!(start + freed, near(10).as_yoctonear(), "all of the deposit");
+    assert!(c.get_budget(acc("alice.near")).is_none());
+    let msg = panic_text(|| {
+        buy_from_budget(&mut c, "alice.near", P);
+    });
+    assert!(msg.contains("This account has no agent budget"), "{msg}");
 }
 
 #[test]
 fn withdraw_budget_rules() {
     let mut c = setup();
-    let start = deposit(&mut c, near(10), &[]).balance.as_yoctonear();
+    let start = deposit(&mut c, near(10), &[P]).balance.as_yoctonear();
     let cases: Vec<(&str, NearToken, Option<NearToken>, &str)> = vec![
         ("alice.near", yocto(0), Some(near(1)), "exactly 1 yoctoNEAR"),
         ("alice.near", yocto(2), Some(near(1)), "exactly 1 yoctoNEAR"),
+        ("alice.near", yocto(0), None, "exactly 1 yoctoNEAR"),
         (
             "alice.near",
             yocto(YOCTO),
@@ -2119,18 +2217,19 @@ fn withdraw_budget_rules() {
 #[test]
 fn a_budget_serves_only_its_owner() {
     let mut c = setup();
-    let alice_start = deposit(&mut c, near(20), &[]).balance.as_yoctonear();
+    let alice_start = deposit(&mut c, near(20), &[P]).balance.as_yoctonear();
     // Bob has no budget: he cannot buy from alice's.
-    call("bob.near", yocto(0), 10_000);
     let msg = panic_text(|| {
-        c.buy_from_budget(P.into());
+        buy_from_budget(&mut c, "bob.near", P);
     });
     assert!(msg.contains("This account has no agent budget"), "{msg}");
     // With his own budget, bob pays from his own balance.
     call("bob.near", near(6), 10_000);
-    let bob_start = c.deposit_budget(near(5), vec![]).balance.as_yoctonear();
-    call("bob.near", yocto(0), 10_000);
-    let l = c.buy_from_budget(P.into());
+    let bob_start = c
+        .deposit_budget(near(5), vec![P.into()])
+        .balance
+        .as_yoctonear();
+    let l = buy_from_budget(&mut c, "bob.near", P);
     assert_eq!(l.owner_id, acc("bob.near"));
     call("bob.near", yocto(0), 20_000);
     let before = env::storage_usage();
@@ -2141,9 +2240,12 @@ fn a_budget_serves_only_its_owner() {
         bob_start - near(5).as_yoctonear() - seat
     );
     assert_eq!(budget(&c, "alice.near").balance.as_yoctonear(), alice_start);
-    // Bob cannot withdraw from alice's budget: he withdraws from his own.
+    // Bob withdraws from his own budget, not from alice's.
     call("bob.near", yocto(YOCTO), 20_000);
-    c.withdraw_budget(None);
-    assert_eq!(transfers()[0].0, acc("bob.near"));
+    assert!(c.withdraw_budget(None).is_none());
+    let paid = transfers();
+    assert_eq!(paid.len(), 1);
+    assert_eq!(paid[0].0, acc("bob.near"));
+    assert!(c.get_budget(acc("bob.near")).is_none());
     assert_eq!(budget(&c, "alice.near").balance.as_yoctonear(), alice_start);
 }

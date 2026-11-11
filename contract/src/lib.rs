@@ -60,6 +60,7 @@ const MAX_PAGE: u32 = 100;
 const MAX_PAYEES: usize = 16;
 const MAX_DEVICES: u8 = 16;
 const MAX_VERSIONS: usize = 1_000;
+const MAX_BUDGET_PRODUCTS: usize = 16;
 
 // The order of the variants is part of the stored state. Do not change it.
 #[derive(BorshStorageKey)]
@@ -178,7 +179,8 @@ pub struct Budget {
     pub balance: NearToken,
     /// The highest price of one license that the budget pays.
     pub max_price: NearToken,
-    /// The products that the budget can buy. Empty: all products.
+    /// The products that the budget can buy and register seats for. At
+    /// least one: a product that someone adds later is never included.
     pub products: Vec<String>,
 }
 
@@ -395,20 +397,25 @@ impl Contract {
     }
 
     /// Buys a new license of `product` for the caller and pays it from the
-    /// caller's agent budget. A function-call key can call it.
-    pub fn buy_from_budget(&mut self, product: String) -> LicenseView {
+    /// caller's agent budget. A function-call key can call it. `price` is the
+    /// price that the agent saw; the call fails if the price is different
+    /// now, so that a price change cannot take more from the budget.
+    pub fn buy_from_budget(&mut self, product: String, price: NearToken) -> LicenseView {
         let buyer = env::predecessor_account_id();
-        let price = self.product(&product).terms.price;
+        require!(
+            self.product(&product).terms.price == price,
+            "The price changed. Read the product again"
+        );
         let mut b = self.budget_of(&buyer);
         require!(
-            b.products.is_empty() || b.products.contains(&product),
-            "The agent budget does not allow this product"
+            b.products.contains(&product),
+            "The agent budget does not allow this product. The owner changes the budget on My licenses of the BuildDeed website"
         );
         require!(
             price <= b.max_price,
-            "The price is more than the highest price of the agent budget"
+            "The price is more than the highest price of the agent budget. The owner changes the budget on My licenses of the BuildDeed website"
         );
-        require!(b.balance >= price, "The agent budget is too low");
+        require!(b.balance >= price, "The agent budget is too low. The owner adds NEAR on My licenses of the BuildDeed website");
         b.balance = b.balance.saturating_sub(price);
         self.budgets.insert(buyer.clone(), b);
         self.sell(&buyer, &product)
@@ -417,9 +424,9 @@ impl Contract {
     // ----- Agent budget -----
 
     /// Adds the attached NEAR to the caller's agent budget and sets its
-    /// limits: the highest price of one license, and the products (empty:
-    /// all). Attach at least 1 yoctoNEAR, so that a function-call key cannot
-    /// change the limits. The storage of a new budget comes out of the
+    /// limits: the highest price of one license, and the 1 to 16 products
+    /// that the agent can buy. Attach at least 1 yoctoNEAR, so that a
+    /// function-call key cannot change the limits. The storage of a new budget comes out of the
     /// deposit.
     #[payable]
     pub fn deposit_budget(&mut self, max_price: NearToken, products: Vec<String>) -> Budget {
@@ -429,7 +436,11 @@ impl Contract {
             !deposit.is_zero(),
             "Attach at least 1 yoctoNEAR: only a full-access key can change a budget"
         );
-        require!(products.len() <= MAX_PAYEES, "Give at most 16 products");
+        if products.is_empty() || products.len() > MAX_BUDGET_PRODUCTS {
+            env::panic_str(&format!(
+                "Give 1 to {MAX_BUDGET_PRODUCTS} products that the agent can buy"
+            ));
+        }
         for p in &products {
             require!(self.products.contains_key(p), "No product has this key");
         }
@@ -443,29 +454,47 @@ impl Contract {
         b.products = products;
         self.budgets.insert(owner.clone(), b.clone());
         self.budgets.flush();
-        let cost = storage_cost_since(before);
+        // A shorter product list frees storage: it goes back to the balance.
+        let after = env::storage_usage();
+        let byte = env::storage_byte_cost();
+        let cost = byte.saturating_mul(u128::from(after.saturating_sub(before)));
+        let freed = byte.saturating_mul(u128::from(before.saturating_sub(after)));
         require!(
             deposit >= cost,
             "The deposit does not cover the storage of the budget"
         );
-        let b = self.budgets.get_mut(&owner).expect("inserted above");
-        b.balance = b.balance.saturating_add(deposit.saturating_sub(cost));
-        b.clone()
+        b.balance = b
+            .balance
+            .saturating_add(deposit.saturating_sub(cost))
+            .saturating_add(freed);
+        // Same size as the record above: no storage change.
+        self.budgets.insert(owner, b.clone());
+        b
     }
 
-    /// Pays `amount` of the caller's agent budget back to the caller, or all
-    /// of it. Attach exactly 1 yoctoNEAR.
+    /// Pays `amount` of the caller's agent budget back to the caller. With
+    /// no amount, pays all of it, removes the budget and returns the storage
+    /// of its record too. Attach exactly 1 yoctoNEAR. Returns the budget
+    /// after the withdrawal, or None when it is removed.
     #[payable]
-    pub fn withdraw_budget(&mut self, amount: Option<NearToken>) -> Budget {
+    pub fn withdraw_budget(&mut self, amount: Option<NearToken>) -> Option<Budget> {
         assert_one_yocto();
         let owner = env::predecessor_account_id();
         let mut b = self.budget_of(&owner);
-        let amount = amount.unwrap_or(b.balance);
+        let Some(amount) = amount else {
+            let before = env::storage_usage();
+            self.budgets.remove(&owner);
+            self.budgets.flush();
+            let freed = env::storage_byte_cost()
+                .saturating_mul(u128::from(before.saturating_sub(env::storage_usage())));
+            pay(&owner, b.balance.saturating_add(freed));
+            return None;
+        };
         require!(amount <= b.balance, "The agent budget is too low");
         b.balance = b.balance.saturating_sub(amount);
         self.budgets.insert(owner.clone(), b.clone());
         pay(&owner, amount);
-        b
+        Some(b)
     }
 
     // ----- Sales (internal) -----
@@ -642,8 +671,12 @@ impl Contract {
     pub fn add_device_from_budget(&mut self, token_id: TokenId, device_id: String) -> LicenseView {
         let caller = env::predecessor_account_id();
         let mut b = self.budget_of(&caller);
+        require!(
+            b.products.iter().any(|p| p == product_of(&token_id)),
+            "The agent budget does not allow this product. The owner changes the budget on My licenses of the BuildDeed website"
+        );
         let cost = self.seat(&caller, &token_id, device_id);
-        require!(b.balance >= cost, "The agent budget is too low");
+        require!(b.balance >= cost, "The agent budget is too low. The owner adds NEAR on My licenses of the BuildDeed website");
         b.balance = b.balance.saturating_sub(cost);
         self.budgets.insert(caller, b);
         self.license_view(&token_id).expect("the license exists")
@@ -896,9 +929,10 @@ impl Contract {
         self.budgets.get(&account_id).cloned()
     }
 
-    /// The newest build of `product` that has a file for `platform` (for
-    /// example "linux-x86_64"), and that file. With more than one file for
-    /// the platform, the first recorded one.
+    /// The last recorded build of `product` that has a file for `platform`
+    /// (for example "linux-x86_64"), and that file. With more than one file
+    /// for the platform, the first recorded one: the release records its
+    /// main download for each platform first.
     pub fn latest_build(&self, product: String, platform: String) -> Option<ArtifactMatch> {
         let list = self.versions.get(&product)?;
         list.iter().rev().find_map(|v| {
@@ -955,7 +989,7 @@ impl Contract {
 
     fn budget_of(&self, owner: &AccountId) -> Budget {
         self.budgets.get(owner).cloned().unwrap_or_else(|| {
-            env::panic_str("This account has no agent budget. Call deposit_budget")
+            env::panic_str("This account has no agent budget. The owner deposits one with a full-access key on My licenses of the BuildDeed website")
         })
     }
 

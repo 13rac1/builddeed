@@ -457,9 +457,11 @@ async fn two_products_sale_resale_and_isolation_on_sandbox() -> anyhow::Result<(
         .into_result()?;
     let agent = Account::from_secret_key(carol.id().clone(), agent_key, &worker);
 
+    // The agent reads the price and gives it to buy_from_budget.
+    let product = view(&contract, "get_product", json!({ "key": "checksum" })).await?;
     let bought: Value = agent
         .call(contract.id(), "buy_from_budget")
-        .args_json(json!({ "product": "checksum" }))
+        .args_json(json!({ "product": "checksum", "price": product["price"] }))
         // The prepaid gas must fit in the allowance of the key.
         .gas(Gas::from_tgas(300))
         .transact()
@@ -514,6 +516,14 @@ async fn two_products_sale_resale_and_isolation_on_sandbox() -> anyhow::Result<(
         "withdraw_budget with a function-call key must fail",
     );
     assert!(err.contains("MethodNameMismatch"), "{err}");
+    // The key cannot change the limits: deposit_budget is not in its list.
+    let limits = agent
+        .call(contract.id(), "deposit_budget")
+        .args_json(json!({ "max_price": (100 * NEAR).to_string(), "products": ["doom"] }))
+        .transact()
+        .await;
+    let err = failure(limits, "deposit_budget with a function-call key must fail");
+    assert!(err.contains("MethodNameMismatch"), "{err}");
     let list = agent
         .call(contract.id(), "list")
         .args_json(json!({ "token_id": "checksum:2", "price": (3 * NEAR).to_string() }))
@@ -535,14 +545,21 @@ async fn two_products_sale_resale_and_isolation_on_sandbox() -> anyhow::Result<(
         "the license is not listed"
     );
 
-    // The full-access key can withdraw all of it.
-    carol
+    let budget_now = view(&contract, "get_budget", json!({ "account_id": carol.id() })).await?;
+    assert_eq!(budget_now["max_price"], (5 * NEAR).to_string());
+    assert_eq!(budget_now["products"], json!(["checksum"]));
+
+    // The full-access key withdraws all of it, and the budget is removed.
+    let removed: Value = carol
         .call(contract.id(), "withdraw_budget")
         .args_json(json!({}))
         .deposit(NearToken::from_yoctonear(1))
         .transact()
         .await?
-        .into_result()?;
-    assert_eq!(budget_balance(&contract, &carol).await?, 0);
+        .into_result()?
+        .json()?;
+    assert!(removed.is_null());
+    let gone = view(&contract, "get_budget", json!({ "account_id": carol.id() })).await?;
+    assert!(gone.is_null(), "the budget is removed");
     Ok(())
 }
