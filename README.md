@@ -44,7 +44,8 @@ free, then register to remove the nag screen and get the full version.
   wallet transfer (`nft_transfer`) is refused, and a resale price is at least
   the renewal price (2 NEAR in the demo), so that a license cannot change
   owner without a royalty. Buyer and seller can still agree a higher price
-  and pay the difference outside the contract.
+  and pay the difference outside the contract, and the sale of a whole NEAR
+  account moves its licenses with no royalty.
 - **A license covers updates for a period.** The demo license covers the
   builds released in the 365 days after purchase. The owner keeps those
   builds after that time, and can renew.
@@ -83,8 +84,7 @@ NEAR from [near-faucet.io](https://near-faucet.io/).
      2.61 NEAR; the developer, the contributor and the fee account got the
      royalty and the fee. The resale cleared the seats: restart the app of
      the first account, and it shows the
-     nag screen again. (With no network, the app keeps the last check for up
-     to 14 days.)
+     nag screen again.
 8. Go to "Verify a download" and drop a downloaded file.
    - You see: "Official build <version> for <platform>", or "no record" for any
      other file.
@@ -155,7 +155,7 @@ The website: `cd site && npm ci && npm run build` (Node 24).
 ### Deployed contract
 
 The contract on `demo.builddeed.testnet` has the code hash
-`fc5156d8db6121f310cc92b0082f3f29368d50f780a49066eae19af4bbeaee72`.
+`426fc21cb10b4ffe16e1aad04ed1cbbc36a75a190d316d6861e786c70af2bdea`.
 `scripts/contract.sh build` prints the same SHA-256.
 
 ## Trust model and limits
@@ -163,6 +163,10 @@ The contract on `demo.builddeed.testnet` has the code hash
 - The developer holds a full-access key of the contract account and can
   deploy new code. A future version locks the contract or gives upgrades to a
   DAO.
+- The developer can change the payees and the prices of future sales at any
+  time. The renewal price is also the lowest resale price, so a developer who
+  raises it can price resales out of the market. The royalty and the
+  BuildDeed fee are fixed at deploy time.
 - A stolen release key can record a false build, or take a future version
   name. It cannot change or remove a recorded build, and it can add files to
   a version only in the 24 hours after the first record of that version.
@@ -171,8 +175,11 @@ The contract on `demo.builddeed.testnet` has the code hash
 - The computer id comes from the machine id of the operating system. A user
   who controls the computer can change the app to report another id; that is
   the same as building the app without the check.
-- With no network, the app uses its last license check for up to 14 days.
-  The stored check cannot be proven offline.
+- Computers made from one cloned disk image (virtual machines, containers)
+  can share one machine id, and so one seat.
+- There is no offline mode. The app asks the contract for its seat at each
+  start; with no network it runs unregistered. A result stored on the
+  computer could be copied or edited, so the app keeps none.
 - The registration check is in public source code. It works because most users
   and every business prefer to pay than to rebuild, as with shareware.
 - macOS builds are not reproducible. They have a provenance attestation only.
