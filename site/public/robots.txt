@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://13rac1.github.io/builddeed/sitemap.xml

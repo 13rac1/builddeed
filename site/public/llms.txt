@@ -1,9 +1,14 @@
 # BuildDeed
 
-> Software licenses as NFTs on NEAR testnet. One contract, licenses.builddeed.testnet, holds every license of every product and the SHA-256 of each official build. An agent can buy a license, register its computer and download a checked build with no browser.
+> Software licenses as NFTs on NEAR testnet. One contract, licenses.builddeed.testnet, holds every license of every product and the SHA-256 of each official build. An agent can buy a license, register the computer it runs on, and download a checked build with no browser, paid from a budget that the owner sets for 1 to 16 products.
 
-- [Guide for agents](agents.md): views, the calls an agent makes, the owner's budget and key, the builddeed CLI, and what the download check proves.
-- [Protocol spec](https://github.com/13rac1/builddeed-sdk/blob/main/spec/README.md): the computer id, the license check and the register link.
+- [Guide for agents](https://13rac1.github.io/builddeed/agents.md): the views, buy_from_budget (with the price from get_product) and add_device_from_budget, the owner's budget and key, the builddeed CLI, seats, retries, and what the download check proves.
+- [Protocol spec](https://github.com/13rac1/builddeed-sdk/blob/main/spec/README.md): the computer id, the license check, build records, and agents with no browser.
 - [Contract source](https://github.com/13rac1/builddeed/blob/main/contract/src/lib.rs): the methods and their JSON.
-- Contract on NEAR testnet: licenses.builddeed.testnet
-- RPC: https://rpc.testnet.fastnear.com
+
+## Rules for agents
+
+- Register a seat only for the computer that runs the CLI, with the id that `builddeed device-id` prints there. A container or a sandbox is another computer.
+- After `unconfirmed_tx`, do not send again: run `builddeed budget` first.
+- Never paste the key into a chat.
+- Contract on NEAR testnet: licenses.builddeed.testnet. RPC: https://rpc.testnet.fastnear.com

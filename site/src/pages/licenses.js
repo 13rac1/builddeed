@@ -53,7 +53,8 @@ function agentKeyCommand(acct) {
     autogenerate-new-keypair save-to-legacy-keychain \\
     network-config testnet sign-with-legacy-keychain send
 $ jq --arg a ${acct} '{account_id: $a, public_key, private_key}' \\
-    ~/.near-credentials/testnet/${acct}/ed25519_<public-key>.json > key.json`;
+    ~/.near-credentials/testnet/${acct}/ed25519_<public-key>.json > key.json
+$ chmod 600 key.json`;
 }
 
 function budgetSection(acct, budget, products) {
@@ -63,13 +64,21 @@ function budgetSection(acct, budget, products) {
   const warn = (msg) => status.replaceChildren(h("p", { class: "warn-text" }, msg));
 
   // Deposit: the amount, the highest price of one license, the products.
-  // Defaults: the highest price of the products now on sale.
-  const highest = products.reduce((m, p) => (BigInt(p.price) > m ? BigInt(p.price) : m), 0n);
+  // The highest price follows the checked products: the highest of their
+  // prices. With a budget, it starts at the budget's value.
   const amount = h("input", { type: "text", id: "budget-amount", inputmode: "decimal", value: "1" });
-  const maxPrice = h("input", { type: "text", id: "budget-max", inputmode: "decimal", value: formatNear((budget ? budget.max_price : highest).toString()) });
+  const maxPrice = h("input", { type: "text", id: "budget-max", inputmode: "decimal", placeholder: "Check a product", value: budget ? formatNear(budget.max_price) : "" });
   const boxes = products.map((p) =>
     h("label", { class: "check" }, h("input", { type: "checkbox", value: p.key, checked: budget?.products.includes(p.key) || null }), ` ${p.name}`)
   );
+  const checked = () => boxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value);
+  const prices = Object.fromEntries(products.map((p) => [p.key, BigInt(p.price)]));
+  for (const b of boxes) {
+    b.querySelector("input").addEventListener("change", () => {
+      const keys = checked();
+      maxPrice.value = keys.length ? formatNear(keys.reduce((m, k) => (prices[k] > m ? prices[k] : m), 0n).toString()) : "";
+    });
+  }
   const deposit = h("button", { type: "submit", class: "btn small" }, "Deposit");
   const depositForm = h(
     "form",
@@ -85,7 +94,7 @@ function budgetSection(acct, budget, products) {
       { class: "field" },
       h("legend", {}, "Products the agent can buy"),
       h("div", { class: "checks" }, boxes),
-      h("span", { class: "help" }, "None selected: all products, also products that are added later.")
+      h("span", { class: "help" }, "Check 1 to 16 products. A product that is added later is not included.")
     ),
     h("div", {}, deposit)
   );
@@ -95,8 +104,10 @@ function budgetSection(acct, budget, products) {
     const m = nearAmount(maxPrice.value);
     if (!a) return warn("Give an amount more than zero, such as 1 or 2.5.");
     if (!budget && BigInt(a) < MIN_FIRST_DEPOSIT) return warn("The first deposit must be at least 0.01 NEAR: it also pays the storage of the budget, about 0.002 NEAR.");
+    const keys = checked();
+    if (!keys.length) return warn("Check at least one product that the agent can buy.");
+    if (keys.length > 16) return warn("Check at most 16 products.");
     if (!m) return warn("Give a highest price more than zero, such as 0.5.");
-    const keys = boxes.map((b) => b.querySelector("input")).filter((i) => i.checked).map((i) => i.value);
     status.replaceChildren();
     busy(deposit, async () => {
       try {
@@ -121,7 +132,8 @@ function budgetSection(acct, budget, products) {
     busy(withdraw, async () => {
       try {
         await call("withdraw_budget", a ? { amount: a } : {}, "1");
-        showOk("The NEAR is back in your account.");
+        // Without an amount, the contract removes the budget and returns null.
+        showOk(a ? `${formatNear(a)} NEAR is back in your account.` : "The budget is removed. The rest of the balance and the storage of the budget record are back in your account.");
         await refresh();
       } catch (err) {
         fail(err);
@@ -148,14 +160,14 @@ function budgetSection(acct, budget, products) {
             { class: "kv" },
             h("dt", {}, "Balance"), h("dd", {}, `${formatNear(budget.balance)} NEAR`),
             h("dt", {}, "Highest price"), h("dd", {}, `${formatNear(budget.max_price)} NEAR for one license`),
-            h("dt", {}, "Products"), h("dd", {}, budget.products.length ? budget.products.map((k) => names[k] || k).join(", ") : "All products")
+            h("dt", {}, "Products"), h("dd", {}, budget.products.map((k) => names[k] || k).join(", "))
           )
         : h("p", {}, "This account has no agent budget."),
       h("h3", { style: "margin-top:18px" }, budget ? "Add NEAR or change the limits" : "Deposit a budget"),
       depositForm,
       budget ? h("h3", { style: "margin-top:18px" }, "Withdraw") : null,
       budget ? h("p", {}, withdrawAmount, " NEAR ", withdraw) : null,
-      budget ? h("p", { class: "muted small" }, "Leave the field empty to withdraw all. One wallet transaction with 1 yoctoNEAR attached.") : null,
+      budget ? h("p", { class: "muted small" }, "Leave the field empty to withdraw all: this also removes the budget and pays back the storage of its record. One wallet transaction with 1 yoctoNEAR attached.") : null,
       status
     ),
     h("h3", { style: "margin-top:24px" }, "Give an agent a key"),
@@ -174,7 +186,12 @@ function budgetSection(acct, budget, products) {
       acct,
       "/ed25519_<public-key>.json, and also in ~/.near-credentials/testnet/",
       acct,
-      ".json when that file does not exist yet. The builddeed CLI reads the key file in that folder as it is. The file also holds a seed phrase, so for an agent on another computer the jq line writes key.json with only account_id, public_key and private_key. Give key.json to the agent. To stop the agent, delete the key or withdraw the budget."
+      ".json when that file does not exist yet. The builddeed CLI reads the key file in that folder as it is. The file also holds a seed phrase, so for an agent on another computer the jq line writes key.json with only account_id, public_key and private_key. To stop the agent, delete the key or withdraw the budget."
+    ),
+    h(
+      "p",
+      { class: "warn-text" },
+      "Copy key.json to the agent's computer, for example with scp. Never paste the key into a chat: anyone who reads the chat can spend the budget."
     )
   );
 }

@@ -393,7 +393,7 @@ main.replaceChildren(
     { class: "muted small" },
     "The key cannot attach NEAR, so each build record takes its storage from the storage balance of your product. ",
     h("a", { href: `${BUILDDEED_REPO}/blob/main/scripts/record-build.sh` }, "scripts/record-build.sh"),
-    " records a release with this key. The near-cli-rs key file has no account_id; the jq line writes the key file that the workflow reads."
+    " records a release with this key. The near-cli-rs key file has no account_id; the jq line writes the key file that the workflow reads. Agents, and the buy page, take the first file that a release records for each platform: record the main download of each platform first."
   ),
   h(
     "ol",
