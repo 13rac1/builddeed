@@ -63,10 +63,10 @@ NEAR from [near-faucet.io](https://near-faucet.io/).
    start it. See "The installers are not signed" below.
    - You see: the "UNREGISTERED COPY" screen. "Continue unregistered" is
      enabled after 5 seconds.
-2. Drop any file on the app window.
+2. Drop any file on the app window, or click "Choose a file…".
    - You see: its SHA-256. Drop the installer that you downloaded: the app
      shows "Official build <version>", the commit and the attestation link.
-3. Drop a folder on the window.
+3. Drop a folder on the window, or click "Check a folder…".
    - You see: "The folder check needs a license."
 4. Click "Register", then "Buy a license". On the website, connect your
    wallet and click "Buy for 0.1 NEAR".
@@ -113,7 +113,9 @@ The hackathon release has no Apple or Windows code signature.
 - Windows: SmartScreen shows "Windows protected your PC". Click "More info",
   then "Run anyway". The installer installs for the current user only.
 - Linux: `sudo apt install ./builddeed-checksum_<version>_amd64.deb`, or extract
-  the `.tar.gz` and run `builddeed-checksum`.
+  the `.tar.gz` and run `builddeed-checksum`. The file and folder dialogs use
+  the XDG desktop portal (`xdg-desktop-portal`). On Wayland, drag and drop is
+  not available: use the "Choose a file…" and "Check a folder…" buttons.
 
 ## How NEAR is used
 
@@ -134,7 +136,7 @@ The hackathon release has no Apple or Windows code signature.
 | Path | What it is |
 | --- | --- |
 | `contract/` | The license contract (Rust, near-sdk 5.30). Unit tests in `src/tests.rs`, a near-sandbox test in `tests/sandbox.rs`. |
-| `app/` | BuildDeed Checksum, the demo app (Rust, egui/eframe 0.32). |
+| `app/` | BuildDeed Checksum, the demo app (Rust, Slint 1.18). The window is in `app/ui/app.slint`. |
 | `site/` | The website (Vite, NEAR Connect). |
 | `build/` | The Podman build image (Rust 1.99.1, pinned by digest; Debian packages from a fixed snapshot) and the NSIS installer script. |
 | `scripts/` | Build, package, record and verify scripts. All Rust builds run in Podman. |
@@ -201,7 +203,7 @@ The contract on `licenses.builddeed.testnet` has the code hash
   the tests and the documents with the team, who directed the design and
   reviewed the work.
 - Libraries: near-sdk, near-contract-standards, near-workspaces (contract);
-  eframe/egui, ed25519-dalek, sha2, ureq, serde, base64, bs58, getrandom,
+  Slint, rfd, ed25519-dalek, sha2, ureq, serde, base64, bs58, getrandom,
   hex (app); @hot-labs/near-connect, Vite (site). The full lists are in
   `contract/Cargo.lock`, `app/Cargo.lock` and `site/package-lock.json`.
 - No template was used.
@@ -212,3 +214,7 @@ Business Source License 1.1. See [LICENSE](LICENSE). This is a
 source-available license, not an open source license: the code is public,
 and each version becomes open source (Apache License 2.0) four years after
 its release. Personal use is free. Business use needs a BuildDeed license.
+
+The user interface of the app uses [Slint](https://slint.dev) under the
+Slint Royalty-free Desktop, Mobile, and Web Applications License 2.0. The
+app shows the Slint attribution in Help, "About BuildDeed Checksum".

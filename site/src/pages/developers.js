@@ -448,7 +448,7 @@ main.replaceChildren(
     {},
     "Two working integrations show the whole flow: ",
     h("a", { href: `${BUILDDEED_REPO}/tree/main/app` }, "BuildDeed Checksum"),
-    " (egui) and ",
+    " (Slint) and ",
     h("a", { href: ROOM4DOOM_REPO }, "Room4Doom"),
     " (a complete Doom engine; R in the game registers). Both use the ",
     h("a", { href: "https://github.com/13rac1/builddeed-sdk" }, "BuildDeed SDK"),

@@ -16,7 +16,7 @@ const EXTRAS = {
   checksum: {
     shot: "img/checksum-nag.webp",
     alt: "BuildDeed Checksum showing its UNREGISTERED COPY screen",
-    tags: ["Rust", "egui", "Linux · Windows · macOS"],
+    tags: ["Rust", "Slint", "Linux · Windows · macOS"],
     text: "A file checksum tool. Drop a file to see its SHA-256 and its official build record. Registered: the folder check, which reports what changed since the last check.",
     pixel: false,
   },
