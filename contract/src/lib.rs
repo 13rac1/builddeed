@@ -482,6 +482,9 @@ impl Contract {
     /// The license that a computer is registered on, and whether it covers
     /// `version`. None if the computer has no seat.
     pub fn device_license(&self, device_id: String, version: String) -> Option<DeviceLicense> {
+        if !is_hex(&device_id, 64) || version.len() > MAX_NAME {
+            return None;
+        }
         let token_id = self.devices.get(&device_id)?.clone();
         let owner_id = self.tokens.owner_by_id.get(&token_id)?;
         let l = self.licenses.get(&token_id)?;
@@ -625,6 +628,9 @@ impl Contract {
     /// True if `account_id` owns a license that covers `version`: a license
     /// whose `updates_until_ms` is at or after the release time of the build.
     pub fn is_entitled(&self, account_id: AccountId, version: String) -> bool {
+        if version.len() > MAX_NAME {
+            return false;
+        }
         let Some(build) = self.builds.get(&version) else {
             return false;
         };
@@ -882,6 +888,13 @@ fn check_config(c: &Config) {
     require!(
         c.max_devices >= 1 && c.max_devices <= MAX_DEVICES,
         "Give 1 to 16 computers for each license"
+    );
+    let mut accounts: Vec<&AccountId> = c.payees.iter().map(|p| &p.account_id).collect();
+    accounts.sort();
+    accounts.dedup();
+    require!(
+        accounts.len() == c.payees.len(),
+        "Each payee account can appear only once"
     );
     let total: u32 = c.payees.iter().map(|p| u32::from(p.bps)).sum();
     require!(

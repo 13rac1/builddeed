@@ -695,6 +695,10 @@ fn config_checks() {
         ),
         (|c| c.payees[0].bps = 6999, "add up to 10000"),
         (|c| c.max_devices = 0, "Give 1 to 16 computers"),
+        (
+            |c| c.payees[1].account_id = c.payees[0].account_id.clone(),
+            "Each payee account can appear only once",
+        ),
         (|c| c.max_devices = 17, "Give 1 to 16 computers"),
     ];
     call("dev.near", yocto(0), 1_000);
@@ -880,4 +884,29 @@ fn remove_device_needs_one_yocto_and_a_known_computer() {
         c.remove_device("1".into(), dev('b'));
     });
     assert!(msg.contains("not on this license"), "{msg}");
+}
+
+#[test]
+fn views_refuse_oversized_inputs() {
+    let mut c = setup();
+    call("dev.near", yocto(0), 5_000);
+    c.add_build("0.1.0".into(), commit('a'), vec![artifact('a')]);
+    call("alice.near", near(5), 10_000);
+    c.buy();
+    add(&mut c, "1", 'a');
+    let long = "v".repeat(65);
+    assert!(
+        c.device_license(dev('a'), long.clone()).is_none(),
+        "long version"
+    );
+    assert!(!c.is_entitled(acc("alice.near"), long), "long version");
+    assert!(
+        c.device_license("x".repeat(10_000), "0.1.0".into())
+            .is_none(),
+        "bad device id"
+    );
+    assert!(
+        c.device_license(dev('a'), "0.1.0".into()).is_some(),
+        "normal input"
+    );
 }
