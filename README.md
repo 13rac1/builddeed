@@ -42,7 +42,7 @@ free, then register to remove the nag screen and get the full version.
 - **Licenses can be resold.** The contract has its own market. A resale pays a
   10% royalty on the listed price to the developer and contributors. A
   wallet transfer (`nft_transfer`) is refused, and a resale price is at least
-  the renewal price (2 NEAR in the demo), so that a license cannot change
+  the renewal price (0.04 NEAR in the demo), so that a license cannot change
   owner without a royalty. Buyer and seller can still agree a higher price
   and pay the difference outside the contract, and the sale of a whole NEAR
   account moves its licenses with no royalty.
@@ -68,7 +68,7 @@ NEAR from [near-faucet.io](https://near-faucet.io/).
 3. Drop a folder on the window.
    - You see: "The folder check needs a license."
 4. Click "Register", then "Buy a license". On the website, connect your
-   wallet and click "Buy for 5 NEAR".
+   wallet and click "Buy for 0.1 NEAR".
    - You see: one wallet approval, then "License bought". On "My licenses":
      license #N, updates until one year from now.
 5. In the app, click "I have a license". The browser opens the register page
@@ -78,10 +78,10 @@ NEAR from [near-faucet.io](https://near-faucet.io/).
      <date>" and the nag screen is gone. "My licenses" shows 1 of 3 seats.
 6. Drop the same folder twice, with a change between the two.
    - You see: a report of the changed, added and removed files.
-7. On the website, go to "My licenses" and list the license for 3 NEAR. With
+7. On the website, go to "My licenses" and list the license for 0.2 NEAR. With
    a second testnet account, buy it on "Market".
    - You see: the second account owns the license. The first account got
-     2.61 NEAR; the developer, the contributor and the fee account got the
+     0.174 NEAR; the developer, the contributor and the fee account got the
      royalty and the fee. The resale cleared the seats: restart the app of
      the first account, and it shows the
      nag screen again.
