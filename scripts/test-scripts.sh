@@ -44,21 +44,26 @@ if SUMS="$T/SHA256SUMS" DRY_RUN=1 "$ROOT/scripts/record-build.sh" 0.1.1 x y >/de
   fail "record-build.sh accepted an unknown file"
 fi
 
-# The app and the site use the same register link and contract methods.
-grep -q 'register.html#device={device}&version={VERSION}' "$ROOT/app/src/main.rs" || fail "app register link"
+# The app uses the BuildDeed SDK, which builds the register link (its own
+# tests check the link against the shared fixtures). The site reads it.
+grep -q '^builddeed = { git = "https://github.com/13rac1/builddeed-sdk", rev = "[0-9a-f]\{40\}" }' "$ROOT/app/Cargo.toml" \
+  || fail "app does not use the SDK pinned to a commit"
 for p in device version; do
   grep -q "params.get(\"$p\")" "$ROOT/site/src/pages/register.js" || fail "site reads no $p"
 done
+grep -q 'location.hash.slice(1)).get("product")' "$ROOT/site/src/near.js" || fail "site reads no product from the hash"
 for m in add_device remove_device device_license; do
   grep -q "pub fn $m(" "$ROOT/contract/src/lib.rs" || fail "contract has no $m"
 done
 grep -q '"add_device"' "$ROOT/site/src/pages/register.js" || fail "site does not call add_device"
 grep -q '"remove_device"' "$ROOT/site/src/pages/licenses.js" || fail "site does not call remove_device"
-grep -q '"device_license"' "$ROOT/app/src/near.rs" || fail "app does not call device_license"
 
-# The contract account and RPC host are the same everywhere.
+# The contract account and RPC host are the same everywhere (the app gets
+# the RPC host from the SDK's testnet default).
 for f in app/src/main.rs site/src/near.js scripts/verify.sh scripts/record-build.sh; do
   grep -q 'demo.builddeed.testnet' "$ROOT/$f" || fail "$f does not name demo.builddeed.testnet"
+done
+for f in site/src/near.js scripts/verify.sh scripts/record-build.sh; do
   grep -q 'rpc.testnet.fastnear.com' "$ROOT/$f" || fail "$f does not use rpc.testnet.fastnear.com"
 done
 
