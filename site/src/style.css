@@ -150,6 +150,7 @@ input[type="text"] {
   font: 1rem var(--sans); padding: 9px 10px; border-radius: 8px;
   border: 1px solid var(--line); background: var(--surface); color: var(--ink); width: 9em;
 }
+input.code-input { font-family: var(--mono); font-size: 1.25rem; letter-spacing: .25em; width: 7.5em; }
 :focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; }
 
 /* Sections */

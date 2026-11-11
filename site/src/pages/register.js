@@ -6,8 +6,10 @@
 // program on this computer (http://127.0.0.1:<port>/builddeed/<code>). The
 // program answers with its computer id. A link that someone sent from another
 // computer has no program behind it here, so the page refuses it. When the
-// browser blocks the request, the page shows a warning and asks the owner to
-// confirm. See spec/README.md in the BuildDeed SDK.
+// browser blocks the request, the page asks for the 6-digit confirmation code
+// that the program shows. The code comes from the computer id, so a link for
+// another computer expects another code. See spec/README.md in the BuildDeed
+// SDK.
 //
 // The owner picks a license and registers the computer with one wallet
 // transaction (add_device). The program sees the seat a few seconds later.
@@ -31,8 +33,17 @@ const short = (d) => `${d.slice(0, 8)}...${d.slice(-4)}`;
 
 /** "checking", "confirmed", "other" (another computer), "blocked" or "none". */
 let presence = "checking";
-/** True when the owner confirms the warning after a blocked check. */
-let ownerConfirmed = false;
+/** True when the owner typed the confirmation code of this link's computer. */
+let codeOk = false;
+/** The code that the program for `device` shows; set after the hash. */
+let expectedCode = null;
+
+/** decimal(first 4 bytes of SHA-256("builddeed-confirm-v1\n" + id)) mod 1e6, 6 digits. */
+async function confirmCode(id) {
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`builddeed-confirm-v1\n${id}`));
+  const n = new DataView(hash).getUint32(0, false);
+  return String(n % 1000000).padStart(6, "0");
+}
 
 async function checkPresence() {
   if (!Number.isInteger(port) || port < 1024 || port > 65535 || !/^[0-9a-f]{32}$/.test(code)) {
@@ -70,12 +81,30 @@ function presenceNote() {
         h("p", { class: "muted" }, `To register this computer, open ${PRODUCT.name} here and use "I have a license" (R on the Iron Doom title screen).`)
       );
     default: {
-      const box = h("input", { type: "checkbox", id: "confirm" });
-      box.addEventListener("change", () => {
-        ownerConfirmed = box.checked;
-        render(currentAcct).catch(showError);
+      const input = h("input", {
+        id: "confirm-code",
+        type: "text",
+        inputmode: "numeric",
+        autocomplete: "off",
+        maxlength: "6",
+        placeholder: "000000",
+        class: "code-input",
+        "aria-describedby": "code-help",
       });
-      box.checked = ownerConfirmed;
+      const result = h("p", { class: "small", "aria-live": "polite" });
+      input.addEventListener("input", () => {
+        const typed = input.value.replace(/\D/g, "");
+        const was = codeOk;
+        codeOk = typed.length === 6 && typed === expectedCode;
+        if (typed.length === 6 && !codeOk) {
+          result.className = "warn-text small";
+          result.textContent = "This is not the code of the computer in this link. Do not register it.";
+        } else {
+          result.className = "small";
+          result.textContent = "";
+        }
+        if (codeOk !== was) render(currentAcct).catch(showError);
+      });
       return h(
         "div",
         { class: "card" },
@@ -88,17 +117,20 @@ function presenceNote() {
         ),
         h(
           "p",
-          { class: "muted" },
-          `Register only if you clicked "I have a license" in ${PRODUCT.name} on this computer yourself, just now. A register link that someone sent you would give a seat to their computer.`
+          { id: "code-help" },
+          `Enter the 6-digit code that ${PRODUCT.name} shows on this computer now. Read it from the program, not from a message: a code that someone sent you gives a seat to their computer.`
         ),
-        h("label", {}, box, " I opened this page from the program on this computer")
+        codeOk
+          ? h("p", { class: "ok-text" }, "The code matches the computer in this link.")
+          : h("label", {}, "Code ", input),
+        result
       );
     }
   }
 }
 
 function canRegister() {
-  return presence === "confirmed" || ((presence === "blocked" || presence === "none") && ownerConfirmed);
+  return presence === "confirmed" || ((presence === "blocked" || presence === "none") && codeOk);
 }
 
 function invalid() {
@@ -189,6 +221,7 @@ if (!/^[0-9a-f]{64}$/.test(device)) {
         currentAcct = a;
         render(a).catch(showError);
       });
+      confirmCode(device).then((c) => (expectedCode = c));
       checkPresence().then((p) => {
         presence = p;
         render(currentAcct).catch(showError);
