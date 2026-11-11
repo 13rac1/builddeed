@@ -477,9 +477,10 @@ dependencies = [
 [[package]]
 name = "builddeed"
 version = "0.1.0"
-source = "git+https://github.com/13rac1/builddeed-sdk?rev=0d1be2c73c70d29786a4d454ef0327f821864a4d#0d1be2c73c70d29786a4d454ef0327f821864a4d"
+source = "git+https://github.com/13rac1/builddeed-sdk?rev=4d5860eb93fb9f7be836241ab5ecd5b70cba7209#4d5860eb93fb9f7be836241ab5ecd5b70cba7209"
 dependencies = [
  "base64",
+ "getrandom 0.2.17",
  "hex",
  "serde",
  "serde_json",
