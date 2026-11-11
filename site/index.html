@@ -4,75 +4,175 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BuildDeed</title>
-  <meta name="description" content="Software licenses as NFTs on NEAR. The license gives you the verified official build. You can resell it, and each sale pays the developers and contributors.">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b6e6e'/%3E%3Ctext x='16' y='21' font-family='monospace' font-size='13' font-weight='700' fill='white' text-anchor='middle'%3EBD%3C/text%3E%3C/svg%3E">
+  <meta name="description" content="Shareware is back, but you can resell your license. BuildDeed sells software licenses as NFTs on NEAR: the license gives you the verified official build, and every sale pays the developers and contributors.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="BuildDeed: shareware is back, but you can resell your license">
+  <meta property="og:description" content="Software licenses as NFTs on NEAR. Verified official builds, three computer seats, and a 10% royalty to the developers on every resale.">
+  <meta property="og:image" content="https://13rac1.github.io/builddeed/og.png">
+  <meta property="og:url" content="https://13rac1.github.io/builddeed/">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
 </head>
 <body>
 <main>
   <section class="hero">
     <div>
+      <span class="eyebrow">NEAR HACKATHON 2026 · testnet demo</span>
       <h1>Shareware is back, but you can resell your license.</h1>
-      <p class="lead">BuildDeed sells software licenses as NFTs on NEAR. A license gives you the verified official build of a program whose source code is public. When you no longer need it, you sell it, and the developers and contributors get a share of that sale too.</p>
-      <p>
-        <a class="btn" id="buy" href="buy.html">Buy a license</a>
-        <a class="btn ghost" id="download" href="#">Download the demo app</a>
-      </p>
+      <p class="lead">BuildDeed sells software licenses as NFTs on NEAR. A license gives you the verified official build of a program whose source code is public. Done with it? Sell it, and the developers and contributors get paid again.</p>
+      <div class="btn-row">
+        <a class="btn" href="buy.html?product=doom">Try it with Iron Doom</a>
+        <a class="btn ghost" href="#how">How it works</a>
+      </div>
+      <p class="note">Testnet NEAR is free from the <a href="https://near-faucet.io/">faucet</a>. Nothing here costs real money.</p>
     </div>
-    <div class="dialog" aria-label="The demo app's registration screen">
-      <div class="title">BuildDeed Checksum</div>
-      <div class="body">
-        <div class="unreg">UNREGISTERED COPY</div>
-        <p>BuildDeed Checksum 0.1.0 is shareware. A license pays the developers and the contributors of this program, turns on the folder check, and removes this screen.</p>
-        <div class="row">
-          <span class="fake-btn">Buy a license</span>
-          <span class="fake-btn">I have a license</span>
-          <span class="fake-btn">Continue unregistered (5)</span>
+    <div class="dialog-stage">
+      <div class="dialog" id="demo-dialog" aria-live="polite">
+        <div class="title"><span>BuildDeed Checksum</span><span class="x" aria-hidden="true">×</span></div>
+        <div class="body">
+          <div class="status" id="demo-status">UNREGISTERED COPY</div>
+          <p id="demo-text">BuildDeed Checksum is shareware. A license pays the developers and contributors of this program, turns on the folder check, and removes this screen.</p>
+          <div class="row">
+            <button class="dbtn" type="button" id="demo-buy">Buy a license</button>
+            <button class="dbtn" type="button" id="demo-register">I have a license</button>
+            <button class="dbtn" type="button" id="demo-continue" disabled>Continue (5)</button>
+          </div>
         </div>
+        <div class="stamp" aria-hidden="true">REGISTERED</div>
+      </div>
+      <p class="caption">Click "I have a license". In the real app, one wallet approval does this.</p>
+    </div>
+  </section>
+
+  <div class="facts" aria-label="Key numbers">
+    <div><strong>3%</strong><span>BuildDeed fee: one tenth of the 30% app store rate</span></div>
+    <div><strong>10%</strong><span>royalty to the developers on every resale</span></div>
+    <div><strong>3 seats</strong><span>computers on each license, moved by the owner</span></div>
+    <div><strong>Same bytes</strong><span>Linux and Windows builds rebuilt on three machines</span></div>
+  </div>
+
+  <section class="section" id="how">
+    <div class="section-head">
+      <h2>How it works</h2>
+      <p>The code stays public. What you buy is the official build, its updates, and a license you can sell.</p>
+    </div>
+    <div class="steps">
+      <div class="card step">
+        <span class="num">01</span>
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg></div>
+        <h3>Download the official build</h3>
+        <p class="muted">It runs as shareware: a nag screen, and the registered features are off.</p>
+      </div>
+      <div class="card step">
+        <span class="num">02</span>
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M7 15h4"/></svg></div>
+        <h3>Buy a license</h3>
+        <p class="muted">One wallet approval. The contract mints an NFT to you and pays the developers, the contributors and the 3% fee.</p>
+      </div>
+      <div class="card step">
+        <span class="num">03</span>
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4m-3-9 2 2 4-4"/></svg></div>
+        <h3>Register your computer</h3>
+        <p class="muted">The app opens this site with its computer id. A license has three seats. The app finds its seat on chain, so no license server has to stay up.</p>
+      </div>
+      <div class="card step">
+        <span class="num">04</span>
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l4 4-4 4M21 7H9a5 5 0 0 0 0 10h1M7 21l-4-4 4-4m-4 4h12a5 5 0 0 0 0-10h-1"/></svg></div>
+        <h3>Resell it</h3>
+        <p class="muted">List it on the market. The buyer pays, 10% goes back to the people who made it, and the sale clears your seats.</p>
       </div>
     </div>
   </section>
 
-  <h2>The problem</h2>
-  <p>Open source developers give away their work, and most of them are not paid for it. Closed licenses pay, but they hide the code, and you cannot sell a license that you no longer use.</p>
-  <p>BuildDeed keeps the code public. Anyone can read it and build it. The license buys the official build: the binary that the developers built, attested and recorded on chain, with updates for a year. That is what shareware sold, and it worked.</p>
-
-  <h2>How it works</h2>
-  <ol class="steps">
-    <li><strong>Download the official app.</strong> It runs, and it shows the shareware screen. The folder check is off.</li>
-    <li><strong>Buy a license.</strong> One wallet approval. The license contract mints an NFT to your account and pays the developers, the contributors and a 3% BuildDeed fee.</li>
-    <li><strong>Register your computer.</strong> The app opens this site with its computer id. One wallet approval gives the computer a seat on your license; a license has three. The app finds its seat on chain and the screen goes away.</li>
-    <li><strong>Resell it.</strong> List your license on the market. The buyer pays, a 10% royalty goes to the developers and contributors, and you get the rest. The sale clears your seats, so your computers go back to unregistered.</li>
-    <li><strong>Verify any download.</strong> Each official file has a SHA-256 on chain, with a link to its build attestation. Drop a file on the verify page to check it.</li>
-  </ol>
-
-  <h2>What NEAR does here</h2>
-  <div class="grid">
-    <div class="card">
-      <h3>The license is an NFT that pays people</h3>
-      <p>Every sale, first or resale, splits the payment in the contract among the developer and the contributors. Nobody holds the money in between.</p>
+  <section class="section" id="products">
+    <div class="section-head">
+      <h2>Two products, one license system</h2>
+      <p>Each product has its own license contract, terms and build record. Pick one and try the whole flow on testnet.</p>
     </div>
-    <div class="card">
-      <h3>The contract is the record of official builds</h3>
-      <p>The developer records the commit and the hash of each release file. A recorded file cannot be changed or removed, so a download can be checked years later.</p>
+    <div class="grid-2" id="product-cards"></div>
+  </section>
+
+  <section class="section" id="money">
+    <div class="grid-2">
+      <div class="section-head">
+        <h2>Where the money goes</h2>
+        <p>The contract splits every payment in the same transaction. Nobody holds the money in between. These numbers come live from the license contract of <strong id="money-product">the product</strong>.</p>
+        <p class="small muted">The storage of a new license (about 0.01 NEAR) comes out of the first sale before the split.</p>
+      </div>
+      <div class="card money" id="money-bars"><div class="skeleton"></div><div class="skeleton"></div></div>
     </div>
-    <div class="card">
-      <h3>The license holds its computer seats</h3>
-      <p>The NFT records which computers use it: three seats, moved by the owner, cleared by a resale. The app asks a public NEAR RPC node for its seat. No company has to keep a license server running for your software to work.</p>
+  </section>
+
+  <section class="section" id="verify">
+    <div class="grid-2">
+      <div class="section-head">
+        <h2>Don't trust us. Rebuild it.</h2>
+        <p>Every official file has its SHA-256 on chain, with a link to its GitHub build attestation. A recorded file cannot be changed or removed.</p>
+        <p>The Linux and Windows builds are reproducible: clone the repository, run one script, and get the same bytes as the release. The script checks that the release tag points to the commit that the contract records.</p>
+        <div class="btn-row">
+          <a class="btn ghost" id="verify-link" href="verify.html">Verify a download</a>
+          <a href="https://github.com/13rac1/builddeed#rebuild-a-release-and-compare-optional">Rebuild steps</a>
+        </div>
+      </div>
+      <div class="terminal" aria-label="Output of scripts/verify.sh 0.1.1">
+        <div class="tbar"><i></i><i></i><i></i></div>
+<pre><span class="prompt">$</span> scripts/verify.sh 0.1.1
+Build 0.1.1: commit 0780757fdee7184e364f6145951506a794338536
+<span class="same">SAME</span>   builddeed-checksum-0.1.1-linux-x86_64
+<span class="same">SAME</span>   builddeed-checksum-0.1.1-linux-x86_64.tar.gz
+<span class="skip">SKIP   builddeed-checksum-0.1.1-macos-aarch64.dmg</span>
+<span class="same">SAME</span>   builddeed-checksum-0.1.1-windows-x86_64-setup.exe
+<span class="same">SAME</span>   builddeed-checksum-0.1.1-windows-x86_64.exe
+<span class="same">SAME</span>   builddeed-checksum_0.1.1_amd64.deb
+All 5 Linux and Windows files are the same as the official build.</pre>
+      </div>
     </div>
-  </div>
+  </section>
 
-  <h2>Products</h2>
-  <div class="grid" id="products"></div>
+  <section class="section" id="developers">
+    <div class="cta-band">
+      <div>
+        <h2>Sell your software this way</h2>
+        <p>Keep your code public. Set your price, your update period and who gets paid. Ship reproducible, attested builds, and get a royalty every time a license changes hands.</p>
+      </div>
+      <div class="btn-row" style="margin:0">
+        <a class="btn" href="developers.html">For developers</a>
+        <a class="btn ghost" href="https://github.com/13rac1/builddeed">Source</a>
+      </div>
+    </div>
+  </section>
 
-  <h2>Live from the contract</h2>
-  <div class="grid">
-    <div class="card" id="terms"><p class="muted">Loading the sale terms...</p></div>
-    <div class="card" id="builds"><p class="muted">Loading the official builds...</p></div>
-  </div>
-
-  <h2>For developers</h2>
-  <p>You keep the code public and choose the terms: price, update period, royalty, and who gets paid. Your release pipeline builds in a container, attests each file and records its hash with a key that can call only one contract method. Anyone can rebuild the Linux and Windows files and get the same hash.</p>
-  <p class="muted">This is a testnet demo built for NEAR HACKATHON 2026. Testnet NEAR is free: get some from the <a href="https://near-faucet.io/">faucet</a>.</p>
+  <section class="section faq" id="faq">
+    <div class="section-head"><h2>Questions</h2></div>
+    <details>
+      <summary>Is this DRM?</summary>
+      <p>No. The license check is in public source code, and anyone may build the program without it; the Business Source License allows personal use. What a license sells is the official build, its updates, and a license you can sell later. Shareware worked the same way: most people paid because it was easy and fair.</p>
+    </details>
+    <details>
+      <summary>What happens when I sell my license?</summary>
+      <p>List it on the market at your price (at least the renewal price). When it sells, 3% goes to BuildDeed, 10% to the developers and contributors, and the rest to you. The sale removes your computers from the license, so your copies go back to unregistered. A wallet transfer is refused, so that the royalty is paid.</p>
+    </details>
+    <details>
+      <summary>How many computers can I use?</summary>
+      <p>Three for each license. You add a computer from the app ("I have a license"), and remove one on My licenses to free its seat.</p>
+    </details>
+    <details>
+      <summary>Does the app work offline?</summary>
+      <p>It runs, but unregistered. The app asks the contract for its seat at each start. It keeps no license result on the computer, because a stored result could be copied or edited.</p>
+    </details>
+    <details>
+      <summary>What does "updates for 365 days" mean?</summary>
+      <p>A license covers each official build released in the 365 days after you buy it, and you keep those builds after that time. Renew to extend the period.</p>
+    </details>
+    <details>
+      <summary>Is this real money?</summary>
+      <p>Not yet. This demo runs on NEAR testnet, and testnet NEAR has no value. Get some free from the faucet and try everything.</p>
+    </details>
+    <details>
+      <summary>Who made this?</summary>
+      <p>Hardened Minds, a company that builds TEE verification software, built BuildDeed at NEAR HACKATHON 2026. The code is on GitHub.</p>
+    </details>
+  </section>
 </main>
 <script type="module" src="./src/pages/index.js"></script>
 </body>

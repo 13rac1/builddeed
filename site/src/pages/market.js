@@ -1,5 +1,5 @@
 import { h, mountChrome, busy, showOk, showError } from "../ui.js";
-import { view, call, onAccount, currentAccount, formatNear, formatDate, accountLink, pageLink } from "../near.js";
+import { view, call, onAccount, currentAccount, formatNear, formatDate, accountLink, pageLink, PRODUCT } from "../near.js";
 
 mountChrome();
 const main = document.getElementById("main");
@@ -8,7 +8,7 @@ async function render() {
   const [c, listings] = await Promise.all([view("get_config"), view("get_listings", { from_index: 0, limit: 100 })]);
   const me = currentAccount();
   main.replaceChildren(
-    h("h1", {}, "License market"),
+    h("div", { class: "page-head" }, h("span", { class: "eyebrow" }, PRODUCT.name), h("h1", {}, "License market")),
     h(
       "p",
       { class: "lead" },
@@ -25,7 +25,7 @@ async function render() {
             listings.map((l) => row(l, me))
           )
         )
-      : h("p", {}, "No license is on the market now. Owners can list a license on ", h("a", { href: pageLink("licenses.html") }, "My licenses"), ".")
+      : h("div", { class: "card empty" }, h("p", {}, "No license is on the market now."), h("p", { class: "small" }, "Owners list a license on ", h("a", { href: pageLink("licenses.html") }, "My licenses"), ". Or buy a new one on ", h("a", { href: pageLink("buy.html") }, "Buy"), "."))
   );
 }
 

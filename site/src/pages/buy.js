@@ -1,5 +1,5 @@
 import { h, mountChrome, busy, showOk } from "../ui.js";
-import { view, call, onAccount, currentAccount, formatNear, formatDate, accountLink, FAUCET, REPO, pageLink } from "../near.js";
+import { view, call, onAccount, currentAccount, formatNear, formatDate, accountLink, FAUCET, REPO, pageLink, PRODUCT } from "../near.js";
 
 mountChrome();
 const main = document.getElementById("main");
@@ -27,11 +27,11 @@ async function render() {
     })
   );
   main.replaceChildren(
-    h("h1", {}, `Buy a license for ${c.product}`),
+    h("div", { class: "page-head" }, h("span", { class: "eyebrow" }, PRODUCT.name), h("h1", {}, "Buy a license")),
     h(
       "p",
       { class: "lead" },
-      `${formatNear(c.price)} NEAR gives you the official builds released in the next ${c.update_period_days} days, and you keep them. You can resell the license at any time.`
+      `${formatNear(c.price)} NEAR gives you the official builds of ${c.product} released in the next ${c.update_period_days} days, and you keep them. Use it on ${c.max_devices} computers, and resell it at any time.`
     ),
     h(
       "div",
@@ -68,7 +68,7 @@ async function render() {
       "ul",
       {},
       h("li", {}, "An NFT in your NEAR account (NEP-171). It is your license."),
-      h("li", {}, "The registered app on up to three computers: no shareware screen, and the folder check is on."),
+      h("li", {}, "The registered program on up to three computers: no shareware screen, and the registered features are on."),
       h("li", {}, "Each official build released before the end of your update period. Renew to extend it."),
       h("li", {}, "The right to resell. A wallet transfer is refused; use the market, so that the royalty is paid.")
     ),

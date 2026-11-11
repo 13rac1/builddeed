@@ -1,5 +1,5 @@
 import { h, mountChrome, busy, showOk, showError } from "../ui.js";
-import { view, call, onAccount, signIn, formatNear, formatDate, parseNear, pageLink } from "../near.js";
+import { view, call, onAccount, signIn, formatNear, formatDate, parseNear, pageLink, PRODUCT } from "../near.js";
 
 mountChrome();
 const main = document.getElementById("main");
@@ -8,7 +8,7 @@ let config = null;
 async function render(acct) {
   if (!acct) {
     main.replaceChildren(
-      h("h1", {}, "My licenses"),
+      h("div", { class: "page-head" }, h("span", { class: "eyebrow" }, PRODUCT.name), h("h1", {}, "My licenses")),
       h("p", {}, "Connect your wallet to see your licenses."),
       h("button", { class: "btn", onclick: () => signIn().catch(showError) }, "Connect wallet")
     );
@@ -17,7 +17,7 @@ async function render(acct) {
   config = config ?? (await view("get_config"));
   const list = await view("licenses_for_owner", { account_id: acct });
   main.replaceChildren(
-    h("h1", {}, "My licenses"),
+    h("div", { class: "page-head" }, h("span", { class: "eyebrow" }, PRODUCT.name), h("h1", {}, "My licenses")),
     list.length
       ? h("div", {}, list.map(card))
       : h("p", {}, "This account has no license. ", h("a", { href: pageLink("buy.html") }, "Buy one"), " or look at the ", h("a", { href: pageLink("market.html") }, "market"), ".")
@@ -70,8 +70,15 @@ function card(l) {
   const seats = h(
     "div",
     {},
-    h("p", {}, `Computers: ${l.devices.length} of ${config.max_devices}. Register a computer from the app ("I have a license").`),
-    l.devices.map((d) => {
+    h(
+      "p",
+      {},
+      `Computers: ${l.devices.length} of ${config.max_devices}`,
+      h("span", { class: "seats-meter", "aria-hidden": "true" }, Array.from({ length: config.max_devices }, (_, i) => h("i", { class: i < l.devices.length ? "on" : null }))),
+      h("br"),
+      h("span", { class: "small muted" }, 'Register a computer from the program: "I have a license" or R on the title screen.')
+    ),
+    h("ul", { class: "seat-list" }, l.devices.map((d) => {
       const remove = h("button", { class: "link" }, "Remove");
       remove.addEventListener("click", () =>
         busy(remove, async () => {
@@ -80,8 +87,8 @@ function card(l) {
           await refresh();
         })
       );
-      return h("p", { class: "mono" }, `${d.slice(0, 8)}...${d.slice(-4)} `, remove);
-    })
+      return h("li", {}, `${d.slice(0, 8)}...${d.slice(-4)}`, remove);
+    }))
   );
 
   return h(

@@ -1,5 +1,5 @@
 import { h, mountChrome, showError } from "../ui.js";
-import { view, formatDate, REPO } from "../near.js";
+import { view, formatDate, REPO, PRODUCT } from "../near.js";
 
 mountChrome();
 const main = document.getElementById("main");
@@ -68,7 +68,7 @@ drop.addEventListener("drop", (e) => {
 input.addEventListener("change", () => pick(input.files));
 
 main.replaceChildren(
-  h("h1", {}, "Verify a download"),
+  h("div", { class: "page-head" }, h("span", { class: "eyebrow" }, PRODUCT.name), h("h1", {}, "Verify a download")),
   h(
     "p",
     { class: "lead" },

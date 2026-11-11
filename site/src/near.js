@@ -45,8 +45,13 @@ const GAS = "100000000000000"; // 100 Tgas
 
 const YOCTO = 10n ** 24n;
 
-/** Calls a view method of the license contract. */
-export async function view(method, args = {}) {
+/** Calls a view method of the license contract of this page. */
+export function view(method, args = {}) {
+  return viewOf(PRODUCT, method, args);
+}
+
+/** Calls a view method of the license contract of `product`. */
+export async function viewOf(product, method, args = {}) {
   const res = await fetch(RPC, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -57,7 +62,7 @@ export async function view(method, args = {}) {
       params: {
         request_type: "call_function",
         finality: "optimistic",
-        account_id: CONTRACT,
+        account_id: product.contract,
         method_name: method,
         args_base64: btoa(JSON.stringify(args)),
       },

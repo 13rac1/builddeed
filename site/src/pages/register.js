@@ -19,7 +19,7 @@ const short = (d) => `${d.slice(0, 8)}...${d.slice(-4)}`;
 
 function invalid() {
   main.replaceChildren(
-    h("h1", {}, "Register a computer"),
+    h("div", { class: "page-head" }, h("h1", {}, "Register a computer")),
     h("p", { class: "warn-text" }, "This link has no valid computer id."),
     h("p", {}, 'Open this page from the app: click "I have a license" in BuildDeed Checksum.')
   );
