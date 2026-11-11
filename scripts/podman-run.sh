@@ -19,11 +19,18 @@ if ! podman image exists "$IMAGE"; then
 fi
 
 # The NEAR sandbox binary goes in the cache volume too.
+# Pass SOURCE_DATE_EPOCH only when it is set: an empty value makes GCC
+# stop with "SOURCE_DATE_EPOCH must be a non-negative decimal integer".
+ENV_ARGS=()
+if [ -n "${SOURCE_DATE_EPOCH:-}" ]; then
+  ENV_ARGS+=(-e "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH")
+fi
+
 exec podman run --rm \
   -v "$SRC:/src:Z" \
   -v builddeed-cargo:/cache \
   -e NEAR_SANDBOX_HOME=/cache/near-sandbox \
-  -e SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-}" \
+  "${ENV_ARGS[@]}" \
   -e BD_TEST_ACCOUNT="${BD_TEST_ACCOUNT:-}" \
   -w /src \
   "$IMAGE" "$@"
