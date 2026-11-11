@@ -336,3 +336,7 @@ tr.highlight td { background: var(--accent-soft); font-weight: 600; }
 }
 .toast.error { background: #8e1b16; }
 .toast.ok { background: #1e6b38; }
+
+/* The NFT image of a license (site/public/nft/<product>.svg). */
+.license-art { float: right; width: 128px; height: 128px; border-radius: 10px; margin: 0 0 8px 12px; }
+@media (max-width: 480px) { .license-art { width: 88px; height: 88px; } }

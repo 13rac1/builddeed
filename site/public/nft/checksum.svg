@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="BuildDeed Checksum license">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d3b36"/><stop offset="1" stop-color="#0f6b5f"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <text x="256" y="52" text-anchor="middle" font-family="monospace" font-size="18" letter-spacing="4" fill="#bfe8e0">BUILDDEED LICENSE</text>
+  <!-- the program window -->
+  <rect x="76" y="84" width="360" height="250" rx="14" fill="#f4f1e8" stroke="#08302b" stroke-width="4"/>
+  <rect x="76" y="84" width="360" height="40" rx="14" fill="#1d2b29"/>
+  <rect x="76" y="110" width="360" height="14" fill="#1d2b29"/>
+  <circle cx="104" cy="104" r="7" fill="#e86a4a"/><circle cx="126" cy="104" r="7" fill="#e8c34a"/><circle cx="148" cy="104" r="7" fill="#5ac46a"/>
+  <g font-family="monospace" font-size="15" fill="#1d2b29">
+    <text x="100" y="160">sha256  6e0d63d9 3eb45b95</text>
+    <text x="172" y="184">f5035963 3a167823</text>
+    <text x="172" y="208">a31ff06e f804e86b</text>
+    <text x="172" y="232">fc5b4b1b 07dd3430</text>
+  </g>
+  <rect x="100" y="256" width="312" height="52" rx="8" fill="#d8f2ea" stroke="#0f6b5f" stroke-width="2"/>
+  <path d="M120 282 l12 12 l24 -26" fill="none" stroke="#0f6b5f" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="172" y="289" font-family="sans-serif" font-size="20" font-weight="bold" fill="#0d3b36">Official build 0.1.2</text>
+  <text x="256" y="400" text-anchor="middle" font-family="sans-serif" font-size="38" font-weight="bold" fill="#ffffff">BuildDeed Checksum</text>
+  <text x="256" y="440" text-anchor="middle" font-family="monospace" font-size="15" fill="#bfe8e0">verified official builds · 3 seats</text>
+  <text x="256" y="476" text-anchor="middle" font-family="monospace" font-size="12" fill="#8fc8bd">Business Source License 1.1 · NEAR testnet</text>
+</svg>

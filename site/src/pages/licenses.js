@@ -266,6 +266,14 @@ function card(l, p) {
   return h(
     "div",
     { class: "card" },
+    h("img", {
+      class: "license-art",
+      src: `nft/${l.product}.svg`,
+      alt: `${p.name} license image`,
+      width: "128",
+      height: "128",
+      loading: "lazy",
+    }),
     h("span", { class: "eyebrow" }, p.name),
     h("h3", {}, `License #${tokenNumber(l.token_id)}`),
     h(

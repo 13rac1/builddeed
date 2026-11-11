@@ -119,7 +119,7 @@ The hackathon release has no Apple or Windows code signature.
 
 | Part | NEAR feature |
 | --- | --- |
-| License | NEP-171 NFT with NEP-177 metadata and NEP-181 enumeration. The token metadata holds the update period. |
+| License | NEP-171 NFT with NEP-177 metadata and NEP-181 enumeration. The token metadata holds the update period, and each license shows its product's image (`<product>.svg` under the collection's `base_uri`, served by the website). |
 | Payment split | The contract pays the payees with transfers in the `buy`, `renew` and `buy_listed` calls. |
 | Resale market and royalty | `list`, `delist` (1 yoctoNEAR, so that only a full-access key can call them), `buy_listed` with the price that the buyer saw. `nft_transfer` is refused. |
 | Products | One contract holds every product. A developer calls `add_product` with the key, name, prices, update period, royalty, payees and seats per license, and pays only for the storage of the record. Token ids are `<product>:<number>`, for example `doom:1`. |
@@ -146,7 +146,7 @@ You need Podman.
 
 ```sh
 scripts/check.sh             # everything below, with rustfmt and clippy
-scripts/contract.sh test     # contract: 108 unit tests and the sandbox test
+scripts/contract.sh test     # contract: 113 unit tests and the sandbox test
 scripts/app.sh test          # app: 4 tests (seat check against a local fake RPC)
 scripts/app.sh linux         # app/target/x86_64-unknown-linux-gnu/release/builddeed-checksum
 scripts/app.sh windows       # app/target/x86_64-pc-windows-gnu/release/builddeed-checksum.exe
@@ -158,7 +158,7 @@ The website: `cd site && npm ci && npm run build` (Node 24).
 ### Deployed contract
 
 The contract on `licenses.builddeed.testnet` has the code hash
-`5236c5b8227357c52d7e41dda10ac1df52f351763bd766ccaad932f6ad305c27`.
+`6ee2a8bb83803218a94bd2e3da0879ccbab614956e911a5fb29fcee5275ffec5`.
 `scripts/contract.sh build` prints the same SHA-256.
 
 ## Trust model and limits

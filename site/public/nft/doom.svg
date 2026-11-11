@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Room4Doom license: It runs Doom">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a0b0b"/><stop offset="1" stop-color="#3a0d0d"/>
+    </linearGradient>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7a1a10"/><stop offset="1" stop-color="#d0491f"/>
+    </linearGradient>
+    <pattern id="scan" width="4" height="4" patternUnits="userSpaceOnUse">
+      <rect width="4" height="2" fill="#000" opacity="0.18"/>
+    </pattern>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <text x="256" y="52" text-anchor="middle" font-family="monospace" font-size="18" letter-spacing="4" fill="#e8b4a0">BUILDDEED LICENSE</text>
+  <!-- An old handheld that runs it -->
+  <rect x="96" y="76" width="320" height="300" rx="22" fill="#c9c2b0" stroke="#5a5446" stroke-width="4"/>
+  <rect x="122" y="100" width="268" height="190" rx="6" fill="#111"/>
+  <g transform="translate(132 110)">
+    <rect width="248" height="170" fill="url(#sky)"/>
+    <!-- floor -->
+    <polygon points="0,170 248,170 168,96 80,96" fill="#4a3a2a"/>
+    <!-- walls -->
+    <polygon points="0,0 80,52 80,96 0,170" fill="#6b5a44"/>
+    <polygon points="248,0 168,52 168,96 248,170" fill="#5c4c38"/>
+    <rect x="80" y="52" width="88" height="44" fill="#2a1a12"/>
+    <rect x="112" y="64" width="24" height="32" fill="#c63b1c"/>
+    <!-- floor lines -->
+    <g stroke="#2e2418" stroke-width="2">
+      <line x1="40" y1="170" x2="96" y2="96"/><line x1="124" y1="170" x2="124" y2="96"/><line x1="208" y1="170" x2="152" y2="96"/>
+    </g>
+    <!-- the pistol -->
+    <path d="M110 170 L114 132 L122 124 L134 124 L142 132 L144 170 Z" fill="#555"/>
+    <rect x="120" y="116" width="16" height="12" fill="#777"/>
+    <rect width="248" height="170" fill="url(#scan)"/>
+  </g>
+  <!-- buttons -->
+  <circle cx="176" cy="332" r="16" fill="#8a2a2a"/><circle cx="216" cy="332" r="16" fill="#8a2a2a"/>
+  <rect x="290" y="324" width="56" height="16" rx="8" fill="#5a5446"/>
+  <text x="256" y="430" text-anchor="middle" font-family="Impact, 'Arial Black', sans-serif" font-size="48" font-weight="bold" fill="#ff5a2a" stroke="#2a0606" stroke-width="2">IT RUNS DOOM.</text>
+  <text x="256" y="466" text-anchor="middle" font-family="monospace" font-size="15" fill="#e8b4a0">Room4Doom · official build · 3 seats</text>
+  <text x="256" y="492" text-anchor="middle" font-family="monospace" font-size="12" fill="#a07868">GPL-2.0-or-later · Freedoom · NEAR testnet</text>
+</svg>

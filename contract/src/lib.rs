@@ -61,6 +61,9 @@ const MAX_PAYEES: usize = 16;
 const MAX_DEVICES: u8 = 16;
 const MAX_VERSIONS: usize = 1_000;
 const MAX_BUDGET_PRODUCTS: usize = 16;
+/// Where wallets find the image of a license: `<NFT_BASE_URI>/<product>.svg`.
+/// The website serves one image for each product.
+pub const NFT_BASE_URI: &str = "https://13rac1.github.io/builddeed/nft";
 
 // The order of the variants is part of the stored state. Do not change it.
 #[derive(BorshStorageKey)]
@@ -370,6 +373,24 @@ impl Contract {
         let mut terms = self.product(&product).terms.clone();
         terms.price = price;
         terms.renewal_price = renewal_price;
+        self.check_terms(&terms);
+        self.update_terms(&product, terms);
+    }
+
+    /// Changes the name, description and URL of a product. The other terms
+    /// do not change.
+    pub fn set_details(
+        &mut self,
+        product: String,
+        name: String,
+        description: String,
+        url: Option<String>,
+    ) {
+        self.require_developer(&product);
+        let mut terms = self.product(&product).terms.clone();
+        terms.name = name;
+        terms.description = description;
+        terms.url = url;
         self.check_terms(&terms);
         self.update_terms(&product, terms);
     }
@@ -1140,7 +1161,7 @@ fn token_metadata(name: &str, token_id: &TokenId, l: &License) -> TokenMetadata 
         description: Some(format!(
             "Gives the owner the official builds of {name} released at or before the end of the update period."
         )),
-        media: None,
+        media: Some(media_of(token_id)),
         media_hash: None,
         copies: None,
         issued_at: Some(l.purchased_at_ms.to_string()),
@@ -1243,7 +1264,7 @@ impl NonFungibleTokenCore for Contract {
     }
 
     fn nft_token(&self, token_id: TokenId) -> Option<Token> {
-        self.tokens.nft_token(token_id)
+        self.tokens.nft_token(token_id).map(with_media)
     }
 }
 
@@ -1257,7 +1278,11 @@ impl NonFungibleTokenEnumeration for Contract {
     }
 
     fn nft_tokens(&self, from_index: Option<U128>, limit: Option<u64>) -> Vec<Token> {
-        self.tokens.nft_tokens(from_index, limit)
+        self.tokens
+            .nft_tokens(from_index, limit)
+            .into_iter()
+            .map(with_media)
+            .collect()
     }
 
     fn nft_supply_for_owner(&self, account_id: AccountId) -> U128 {
@@ -1272,14 +1297,35 @@ impl NonFungibleTokenEnumeration for Contract {
     ) -> Vec<Token> {
         self.tokens
             .nft_tokens_for_owner(account_id, from_index, limit)
+            .into_iter()
+            .map(with_media)
+            .collect()
     }
 }
 
 #[near]
 impl NonFungibleTokenMetadataProvider for Contract {
     fn nft_metadata(&self) -> NFTContractMetadata {
-        self.metadata.get().expect("set in new")
+        let mut m = self.metadata.get().expect("set in new");
+        m.base_uri = Some(NFT_BASE_URI.to_string());
+        m
     }
+}
+
+/// The image of a license, relative to [`NFT_BASE_URI`]: one per product.
+fn media_of(token_id: &str) -> String {
+    format!("{}.svg", product_of(token_id))
+}
+
+/// Licenses minted before images were added have no `media`: give them the
+/// product's image when a wallet reads them.
+fn with_media(mut t: Token) -> Token {
+    if let Some(m) = t.metadata.as_mut() {
+        if m.media.is_none() {
+            m.media = Some(media_of(&t.token_id));
+        }
+    }
+    t
 }
 
 // ----- Checks and helpers -----

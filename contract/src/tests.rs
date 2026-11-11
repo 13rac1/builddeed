@@ -2249,3 +2249,67 @@ fn a_budget_serves_only_its_owner() {
     assert!(c.get_budget(acc("bob.near")).is_none());
     assert_eq!(budget(&c, "alice.near").balance.as_yoctonear(), alice_start);
 }
+
+// ----- Images and product details -----
+
+#[test]
+fn a_license_has_the_image_of_its_product() {
+    let c = with_license();
+    let t = c.nft_token(T1.into()).unwrap();
+    assert_eq!(t.metadata.unwrap().media.as_deref(), Some("checksum.svg"));
+    assert_eq!(c.nft_metadata().base_uri.as_deref(), Some(NFT_BASE_URI));
+    let listed = c.nft_tokens(None, None);
+    assert_eq!(
+        listed[0].metadata.as_ref().unwrap().media.as_deref(),
+        Some("checksum.svg")
+    );
+}
+
+#[test]
+fn a_license_without_an_image_gets_one_when_read() {
+    let mut t = with_license().nft_token(T1.into()).unwrap();
+    t.metadata.as_mut().unwrap().media = None;
+    let t = with_media(t);
+    assert_eq!(t.metadata.unwrap().media.as_deref(), Some("checksum.svg"));
+}
+
+#[test]
+fn set_details_changes_name_description_and_url_only() {
+    let mut c = setup();
+    let before = c.get_product(P.into()).unwrap();
+    call("dev.near", yocto(0), 5_000);
+    c.set_details(
+        P.into(),
+        "Room4Doom".into(),
+        "It runs Doom.".into(),
+        Some("https://github.com/ai-13rac1/room4doom".into()),
+    );
+    let v = c.get_product(P.into()).unwrap();
+    assert_eq!(v.name, "Room4Doom");
+    assert_eq!(v.description, "It runs Doom.");
+    assert_eq!(
+        v.url.as_deref(),
+        Some("https://github.com/ai-13rac1/room4doom")
+    );
+    assert_eq!(
+        (v.price, v.payees.len()),
+        (before.price, before.payees.len())
+    );
+}
+
+#[test]
+fn set_details_by_other_account_fails() {
+    let mut c = setup();
+    call("eve.near", yocto(0), 5_000);
+    let e = panic_text(|| c.set_details(P.into(), "X".into(), String::new(), None));
+    assert!(e.contains("Only the developer"), "{e}");
+}
+
+#[test]
+fn set_details_refuses_a_url_that_is_not_https() {
+    let mut c = setup();
+    call("dev.near", yocto(0), 5_000);
+    let e =
+        panic_text(|| c.set_details(P.into(), "X".into(), String::new(), Some("http://x".into())));
+    assert!(e.contains("https"), "{e}");
+}
