@@ -1,6 +1,6 @@
 // The program opens this page as
 // register.html#product=<key>&device=<64 hex>&version=<x.y.z>&port=<p>&code=<32 hex>
-// (no product: the demo).
+// (no product: BuildDeed Checksum; the old key "demo" also means Checksum).
 //
 // Presence check: before it asks the owner's wallet, the page asks the
 // program on this computer (http://127.0.0.1:<port>/builddeed/<code>). The
@@ -14,7 +14,7 @@
 // The owner picks a license and registers the computer with one wallet
 // transaction (add_device). The program sees the seat a few seconds later.
 import { h, mountChrome, busy, showError } from "../ui.js";
-import { view, call, onAccount, signIn, formatDate, pageLink, CONTRACT, PRODUCT } from "../near.js";
+import { viewOf, call, onAccount, signIn, formatDate, pageLink, loadProduct, tokenNumber, PRODUCT_KEY } from "../near.js";
 
 mountChrome();
 const main = document.getElementById("main");
@@ -56,7 +56,7 @@ async function checkPresence() {
     });
     if (!res.ok) return "other";
     const answer = await res.json();
-    return answer.device_id === device && answer.contract === CONTRACT ? "confirmed" : "other";
+    return answer.device_id === device && answer.contract === PRODUCT.contract ? "confirmed" : "other";
   } catch {
     return "blocked";
   }
@@ -147,7 +147,7 @@ async function render(acct) {
     h(
       "p",
       { class: "lead" },
-      `Computer ${short(device)} asks for a seat on one of your ${config.product} licenses. A license has ${config.max_devices} seats. The program checks the seat every few seconds and unlocks when it finds it.`
+      `Computer ${short(device)} asks for a seat on one of your ${config.name} licenses. A license has ${config.max_devices} seats. The program checks the seat every few seconds and unlocks when it finds it.`
     ),
     presenceNote(),
   ];
@@ -163,8 +163,8 @@ async function render(acct) {
     return;
   }
   const [licenses, seat] = await Promise.all([
-    view("licenses_for_owner", { account_id: acct }),
-    view("device_license", { device_id: device, version: version || "0" }),
+    viewOf(PRODUCT, "licenses_for_owner", { account_id: acct, product: PRODUCT.key }),
+    viewOf(PRODUCT, "device_license", { product: PRODUCT.key, device_id: device, version: version || "0" }),
   ]);
   if (seat) {
     main.replaceChildren(
@@ -172,7 +172,7 @@ async function render(acct) {
       h(
         "div",
         { class: "card" },
-        h("p", { class: "ok-text" }, `This computer is registered on license #${seat.token_id} of ${seat.owner_id}.`),
+        h("p", { class: "ok-text" }, `This computer is registered on license #${tokenNumber(seat.token_id)} of ${seat.owner_id}.`),
         h("p", {}, "Go back to the program. It unlocks within a few seconds.")
       )
     );
@@ -193,14 +193,14 @@ function card(l) {
   const add = h("button", { class: "btn", disabled: full || !canRegister() }, "Register this computer");
   add.addEventListener("click", () =>
     busy(add, async () => {
-      await call("add_device", { token_id: l.token_id, device_id: device }, SEAT_DEPOSIT);
+      await call("add_device", { token_id: l.token_id, device_id: device }, SEAT_DEPOSIT, PRODUCT.contract);
       await render(currentAcct);
     })
   );
   return h(
     "div",
     { class: "card" },
-    h("h3", {}, `License #${l.token_id}`),
+    h("h3", {}, `License #${tokenNumber(l.token_id)}`),
     h("p", {}, `Updates until ${formatDate(l.updates_until_ms)}. Seats: ${l.devices.length} of ${config.max_devices}.`),
     full
       ? h("p", { class: "muted" }, "All seats are in use. Remove a computer on ", h("a", { href: pageLink("licenses.html") }, "My licenses"), " first.")
@@ -209,13 +209,16 @@ function card(l) {
   );
 }
 
+/** The product of this page; `config` is the same object (its terms). */
+let PRODUCT;
 let config;
 let currentAcct = null;
 if (!/^[0-9a-f]{64}$/.test(device)) {
   invalid();
 } else {
-  view("get_config")
+  loadProduct(PRODUCT_KEY)
     .then((c) => {
+      PRODUCT = c;
       config = c;
       onAccount((a) => {
         currentAcct = a;

@@ -7,11 +7,13 @@ import {
   signIn,
   signOut,
   BUILDDEED_REPO,
+  IRON_DOOM_REPO,
   CONTRACT,
-  PRODUCT,
-  PRODUCTS,
+  PRODUCT_KEY,
+  loadProducts,
   pageLink,
   accountLink,
+  contractError,
 } from "./near.js";
 
 /** h("a", { href: "..." }, "text", child) -> element */
@@ -58,6 +60,9 @@ export const LOGO = `<svg viewBox="0 0 32 32" aria-hidden="true">
 export function mountChrome() {
   const here = location.pathname.split("/").pop() || "index.html";
   const wallet = h("div", { class: "wallet" });
+  // The products come from the contract; the links appear when they load.
+  const switcher = h("div", { class: "products", role: "group", "aria-label": "Product" });
+  const footerProducts = h("ul", {});
   const header = h(
     "header",
     { class: "site-header" },
@@ -78,17 +83,7 @@ export function mountChrome() {
           h("a", { href: pageLink(href), "aria-current": href === here ? "page" : null }, label)
         )
       ),
-      h(
-        "div",
-        { class: "products", role: "group", "aria-label": "Product" },
-        Object.values(PRODUCTS).map((p) =>
-          h(
-            "a",
-            { href: pageLink(here, p), "aria-current": p.key === PRODUCT.key ? "true" : null },
-            p.name
-          )
-        )
-      ),
+      switcher,
       wallet
     )
   );
@@ -109,18 +104,14 @@ export function mountChrome() {
           h(
             "p",
             {},
-            "Software licenses as NFTs on NEAR. The license gives you the verified official build; each sale pays the people who made it."
+            "Software licenses as NFTs on NEAR, in one collection for all products. The license gives you the verified official build; each sale pays the people who made it."
           )
         ),
         h(
           "div",
           {},
           h("h4", {}, "Products"),
-          h(
-            "ul",
-            {},
-            Object.values(PRODUCTS).map((p) => link(pageLink("buy.html", p), p.name))
-          )
+          footerProducts
         ),
         h(
           "div",
@@ -144,8 +135,8 @@ export function mountChrome() {
             "ul",
             {},
             link(BUILDDEED_REPO, "BuildDeed on GitHub"),
-            link(PRODUCTS.doom.repo, "Iron Doom on GitHub"),
-            link(accountLink(CONTRACT), `Contract ${CONTRACT}`),
+            link(IRON_DOOM_REPO, "Iron Doom on GitHub"),
+            link(accountLink(CONTRACT), `License collection ${CONTRACT}`),
             link("https://nearhackathon.com/", "NEAR HACKATHON")
           )
         )
@@ -172,10 +163,25 @@ export function mountChrome() {
     );
   });
   getConnector().catch((e) => console.error("wallet list", e));
+
+  // My licenses and the market show all products, and the program sets the
+  // product of the register page: these pages have no switcher.
+  const noSwitcher = ["licenses.html", "market.html", "register.html"].includes(here);
+  loadProducts()
+    .then((products) => {
+      footerProducts.replaceChildren(...products.map((p) => link(pageLink("buy.html", p), p.name)));
+      if (noSwitcher) return;
+      switcher.replaceChildren(
+        ...products.map((p) =>
+          h("a", { href: pageLink(here, p), "aria-current": p.key === PRODUCT_KEY ? "true" : null }, p.name)
+        )
+      );
+    })
+    .catch(() => {});
 }
 
 export function showError(e) {
-  const msg = e?.message || String(e);
+  const msg = contractError(e);
   const box = h("div", { class: "toast error", role: "alert" }, msg);
   document.body.append(box);
   setTimeout(() => box.remove(), 8000);

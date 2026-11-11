@@ -150,7 +150,7 @@ jobs:
             echo "Official build of BuildDeed Checksum ${GITHUB_REF_NAME#v}, commit ${GITHUB_SHA}."
             echo
             echo "- Build provenance: ${ATTESTATION_URL}"
-            echo "- The license contract demo.builddeed.testnet records the SHA-256 of each file."
+            echo "- The license contract licenses.builddeed.testnet records the SHA-256 of each file (product checksum)."
             echo "- Rebuild and compare the Linux and Windows files: \`scripts/verify.sh ${GITHUB_REF_NAME#v}\`"
             echo "- The installers are not code-signed. See the README for the steps on macOS and Windows."
             echo

@@ -14,10 +14,11 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 VERSION=${1:?usage: scripts/verify.sh <version>}
-CONTRACT=${CONTRACT:-demo.builddeed.testnet}
+CONTRACT=${CONTRACT:-licenses.builddeed.testnet}
+PRODUCT=${PRODUCT:-checksum}
 RPC=${RPC:-https://rpc.testnet.fastnear.com}
 
-ARGS=$(printf '{"version":"%s"}' "$VERSION" | base64 | tr -d '\n')
+ARGS=$(printf '{"product":"%s","version":"%s"}' "$PRODUCT" "$VERSION" | base64 | tr -d '\n')
 RECORD=$(curl -sS -H 'Content-Type: application/json' "$RPC" -d \
   "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"query\",\"params\":{\"request_type\":\"call_function\",\"finality\":\"final\",\"account_id\":\"$CONTRACT\",\"method_name\":\"get_build\",\"args_base64\":\"$ARGS\"}}" \
   | python3 -I -c 'import json,sys; r=json.load(sys.stdin)["result"]["result"]; print(bytes(r).decode())')

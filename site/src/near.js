@@ -3,55 +3,102 @@
 import { NearConnector } from "@hot-labs/near-connect";
 
 export const NETWORK = "testnet";
-/** The products that this site sells. Each has its own license contract. */
-export const PRODUCTS = {
-  demo: {
-    key: "demo",
-    name: "BuildDeed Checksum",
-    contract: "demo.builddeed.testnet",
-    repo: "https://github.com/13rac1/builddeed",
+/** The official BuildDeed collection. Each license of each product is a
+ * token of this one contract. */
+export const CONTRACT = "licenses.builddeed.testnet";
+/** The product of a page without ?product=. */
+export const DEFAULT_PRODUCT = "checksum";
+/** Old product keys of links that are still in use. */
+const ALIASES = { demo: "checksum" };
+
+/** Display data that the contract does not keep, by product key. */
+const EXTRAS = {
+  checksum: {
+    shot: "img/checksum-nag.webp",
+    alt: "BuildDeed Checksum showing its UNREGISTERED COPY screen",
+    tags: ["Rust", "egui", "Linux · Windows · macOS"],
+    text: "A file checksum tool. Drop a file to see its SHA-256 and its official build record. Registered: the folder check, which reports what changed since the last check.",
+    pixel: false,
   },
   doom: {
-    key: "doom",
-    name: "Iron Doom",
-    contract: "doom.builddeed.testnet",
-    repo: "https://github.com/ai-13rac1/iron-doom",
+    shot: "img/doom-title.webp",
+    alt: "Iron Doom title screen with the shareware box: unregistered, press R to register this computer",
+    tags: ["Rust", "Bevy", "GPL-3.0", "Freedoom inside"],
+    text: "A Doom source port in Rust. Unregistered: E1M1 and the shareware screen. Press R on the title screen to register this computer; registered, 1-9 warp to any map.",
+    pixel: true,
   },
 };
 
-/** The product of this page: ?product=doom, or #product=doom (the register
- * page), or the demo. */
-function pageProduct() {
-  const fromQuery = new URLSearchParams(location.search).get("product");
-  const fromHash = new URLSearchParams(location.hash.slice(1)).get("product");
-  return PRODUCTS[fromQuery] || PRODUCTS[fromHash] || PRODUCTS.demo;
-}
-
-export const PRODUCT = pageProduct();
-export const CONTRACT = PRODUCT.contract;
-
-/** A link to another page of this site for the same product. */
-export function pageLink(page, product = PRODUCT) {
-  return product.key === "demo" ? page : `${page}?product=${product.key}`;
-}
-export const RPC = "https://rpc.testnet.fastnear.com";
-export const EXPLORER = "https://testnet.nearblocks.io";
-/** The source repository of the product of this page. */
-export const REPO = PRODUCT.repo;
 /** The repository of BuildDeed itself. */
 export const BUILDDEED_REPO = "https://github.com/13rac1/builddeed";
+/** The repository of Iron Doom, for the footer. */
+export const IRON_DOOM_REPO = "https://github.com/ai-13rac1/iron-doom";
+export const RPC = "https://rpc.testnet.fastnear.com";
+export const EXPLORER = "https://testnet.nearblocks.io";
 export const FAUCET = "https://near-faucet.io/";
 const GAS = "100000000000000"; // 100 Tgas
 
 const YOCTO = 10n ** 24n;
 
-/** Calls a view method of the license contract of this page. */
-export function view(method, args = {}) {
-  return viewOf(PRODUCT, method, args);
+/** A product key from a link, with the old keys changed to the new ones. */
+export function productKey(key) {
+  if (!key) return null;
+  return ALIASES[key] || key;
 }
 
-/** Calls a view method of the license contract of `product`. */
-export async function viewOf(product, method, args = {}) {
+/** The product key of this page: ?product=doom, or #product=doom (the
+ * register page), or the default product. */
+export const PRODUCT_KEY =
+  productKey(new URLSearchParams(location.search).get("product")) ||
+  productKey(new URLSearchParams(location.hash.slice(1)).get("product")) ||
+  DEFAULT_PRODUCT;
+
+/** A link to another page of this site for a product (a key or a product). */
+export function pageLink(page, product = PRODUCT_KEY) {
+  const key = typeof product === "string" ? product : product.key;
+  return key === DEFAULT_PRODUCT ? page : `${page}?product=${encodeURIComponent(key)}`;
+}
+
+/** A product view of the contract with the fields that the site adds. */
+function withExtras(view, contract) {
+  return { ...view, contract, repo: view.url || null, ...(EXTRAS[view.key] || {}) };
+}
+
+let productsPromise = null;
+
+/** The products of the official collection, in the order of the contract.
+ * The page reads them once. */
+export function loadProducts() {
+  if (!productsPromise) {
+    productsPromise = viewAt(CONTRACT, "get_products", { from_index: 0, limit: 100 })
+      .then((list) => list.map((p) => withExtras(p, CONTRACT)))
+      .catch((e) => {
+        productsPromise = null;
+        throw e;
+      });
+  }
+  return productsPromise;
+}
+
+/** The product with this key (default: the product of this page). It
+ * throws when the collection has no such product. */
+export async function loadProduct(key = PRODUCT_KEY) {
+  const p = (await loadProducts()).find((x) => x.key === key);
+  if (!p) throw new Error(`No product has the key "${key}"`);
+  return p;
+}
+
+/** Calls a view method of the official collection. */
+export function view(method, args = {}) {
+  return viewAt(CONTRACT, method, args);
+}
+
+/** Calls a view method of the contract of `product`. */
+export function viewOf(product, method, args = {}) {
+  return viewAt(product.contract, method, args);
+}
+
+async function viewAt(contract, method, args) {
   const res = await fetch(RPC, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -62,7 +109,7 @@ export async function viewOf(product, method, args = {}) {
       params: {
         request_type: "call_function",
         finality: "optimistic",
-        account_id: product.contract,
+        account_id: contract,
         method_name: method,
         args_base64: btoa(JSON.stringify(args)),
       },
@@ -124,15 +171,31 @@ export async function signOut() {
   setAccount(null);
 }
 
-/** Sends one function call to the license contract. */
-export async function call(methodName, args, depositYocto = "0") {
+/** Sends one function call to a license contract (default: the official
+ * collection). */
+export async function call(methodName, args, depositYocto = "0", contract = CONTRACT) {
   const c = await getConnector();
   if (!account) await c.connect();
   const wallet = await c.wallet();
-  return wallet.signAndSendTransaction({
-    receiverId: CONTRACT,
+  const outcome = await wallet.signAndSendTransaction({
+    receiverId: contract,
     actions: [{ type: "FunctionCall", params: { methodName, args, gas: GAS, deposit: depositYocto } }],
   });
+  // Some wallets return a failed transaction instead of an error.
+  const failure = outcome?.status?.Failure;
+  if (failure) {
+    const kind = failure.ActionError?.kind;
+    throw new Error(kind?.FunctionCallError?.ExecutionError || JSON.stringify(failure));
+  }
+  return outcome;
+}
+
+/** The error text of a failed contract call: the contract message when the
+ * text has one, else the full text. */
+export function contractError(e) {
+  const msg = e?.message || String(e);
+  const m = msg.match(/Smart contract panicked: ([^"\\}]+)/);
+  return m ? m[1].trim() : msg;
 }
 
 /** yoctoNEAR string -> "5" or "2.61" (at most 4 decimals). */
@@ -149,6 +212,11 @@ export function parseNear(text) {
   const m = String(text).trim().match(/^(\d+)(?:\.(\d{1,24}))?$/);
   if (!m) throw new Error("Give an amount such as 3 or 2.5");
   return (BigInt(m[1]) * YOCTO + BigInt((m[2] || "").padEnd(24, "0"))).toString();
+}
+
+/** "doom:7" -> "7": the number of a license within its product. */
+export function tokenNumber(tokenId) {
+  return String(tokenId).split(":").pop();
 }
 
 export function formatDate(ms) {

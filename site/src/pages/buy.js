@@ -1,9 +1,11 @@
 import { h, mountChrome, busy, showOk } from "../ui.js";
-import { view, call, onAccount, currentAccount, formatNear, formatDate, accountLink, FAUCET, REPO, pageLink, PRODUCT } from "../near.js";
+import { viewOf, call, onAccount, currentAccount, formatNear, formatDate, tokenNumber, accountLink, FAUCET, pageLink, loadProduct } from "../near.js";
 
 mountChrome();
 const main = document.getElementById("main");
 const owned = h("div", {});
+/** The product of this page, after it loads. */
+let product = null;
 
 function splitRows(c) {
   // The same arithmetic as the contract, without the token storage cost.
@@ -17,21 +19,21 @@ function splitRows(c) {
 }
 
 async function render() {
-  const c = await view("get_config");
+  const c = (product = await loadProduct());
   const buy = h("button", { class: "btn" }, `Buy for ${formatNear(c.price)} NEAR`);
   buy.addEventListener("click", () =>
     busy(buy, async () => {
-      await call("buy", {}, c.price);
+      await call("buy", { product: c.key }, c.price, c.contract);
       showOk("License bought. Go back to the app and click \"I have a license\".");
       await showOwned();
     })
   );
   main.replaceChildren(
-    h("div", { class: "page-head" }, h("span", { class: "eyebrow" }, PRODUCT.name), h("h1", {}, "Buy a license")),
+    h("div", { class: "page-head" }, h("span", { class: "eyebrow" }, c.name), h("h1", {}, "Buy a license")),
     h(
       "p",
       { class: "lead" },
-      `${formatNear(c.price)} NEAR gives you the official builds of ${c.product} released in the next ${c.update_period_days} days, and you keep them. Use it on ${c.max_devices} computers, and resell it at any time.`
+      `${formatNear(c.price)} NEAR gives you the official builds of ${c.name} released in the next ${c.update_period_days} days, and you keep them. Use it on ${c.max_devices} computers, and resell it at any time.`
     ),
     h(
       "div",
@@ -67,8 +69,8 @@ async function render() {
     h(
       "ul",
       {},
-      h("li", {}, "An NFT in your NEAR account (NEP-171). It is your license."),
-      h("li", {}, "The registered program on up to three computers: no shareware screen, and the registered features are on."),
+      h("li", {}, "An NFT in your NEAR account (NEP-171) in the BuildDeed licenses collection. It is your license."),
+      h("li", {}, `The registered program on up to ${c.max_devices} computers: no shareware screen, and the registered features are on.`),
       h("li", {}, "Each official build released before the end of your update period. Renew to extend it."),
       h("li", {}, "The right to resell. A wallet transfer is refused; use the market, so that the royalty is paid.")
     ),
@@ -77,20 +79,19 @@ async function render() {
       { class: "muted" },
       "This is NEAR testnet: the NEAR has no value. Get free testnet NEAR from the ",
       h("a", { href: FAUCET }, "faucet"),
-      ". The source code is public: you can also ",
-      h("a", { href: REPO }, "build it yourself"),
-      "."
+      ".",
+      c.repo ? [" The source code is public: you can also ", h("a", { href: c.repo }, "build it yourself"), "."] : ""
     )
   );
 }
 
 async function showOwned(acct) {
   acct = acct ?? currentAccount();
-  if (!acct) {
+  if (!acct || !product) {
     owned.replaceChildren();
     return;
   }
-  const list = await view("licenses_for_owner", { account_id: acct });
+  const list = await viewOf(product, "licenses_for_owner", { account_id: acct, product: product.key });
   owned.replaceChildren(
     list.length
       ? h(
@@ -98,12 +99,13 @@ async function showOwned(acct) {
           { class: "card" },
           h("h3", {}, "Your licenses"),
           list.map((l) =>
-            h("p", {}, `License #${l.token_id}, updates until ${formatDate(l.updates_until_ms)}. `, h("a", { href: pageLink("licenses.html") }, "Manage"))
+            h("p", {}, `License #${tokenNumber(l.token_id)}, updates until ${formatDate(l.updates_until_ms)}. `, h("a", { href: pageLink("licenses.html") }, "Manage"))
           )
         )
       : ""
   );
 }
 
-render().catch((e) => main.replaceChildren(h("p", { class: "warn-text" }, `Cannot read the contract: ${e.message}`)));
-onAccount((a) => showOwned(a).catch(() => {}));
+render()
+  .then(() => onAccount((a) => showOwned(a).catch(() => {})))
+  .catch((e) => main.replaceChildren(h("p", { class: "warn-text" }, `Cannot read the contract: ${e.message}`)));

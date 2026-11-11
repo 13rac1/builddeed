@@ -7,7 +7,7 @@ developers and contributors. A license gives its owner the verified official
 build of a program. Anyone can read the code and build it.
 
 - Website (testnet demo): https://13rac1.github.io/builddeed/
-- License contract: [`demo.builddeed.testnet`](https://testnet.nearblocks.io/address/demo.builddeed.testnet)
+- License contract: [`licenses.builddeed.testnet`](https://testnet.nearblocks.io/address/licenses.builddeed.testnet): one contract and one NFT collection for every product
 - Downloads: [GitHub releases](https://github.com/13rac1/builddeed/releases/latest)
 - Built at NEAR HACKATHON 2026, track `nfts` ("NFTs That Do Something").
 
@@ -121,10 +121,10 @@ The hackathon release has no Apple or Windows code signature.
 | License | NEP-171 NFT with NEP-177 metadata and NEP-181 enumeration. The token metadata holds the update period. |
 | Payment split | The contract pays the payees with transfers in the `buy`, `renew` and `buy_listed` calls. |
 | Resale market and royalty | `list`, `delist` (1 yoctoNEAR, so that only a full-access key can call them), `buy_listed` with the price that the buyer saw. `nft_transfer` is refused. |
-| Computer seats | `add_device` (owner only, storage paid by the owner), `remove_device`, `device_license(device_id, version)`. Three seats for each license; a resale clears them. The app reads its seat with a view call, so registration needs no license server and no callback to the app. |
-| Build record | `add_build` (append-only), `find_artifact`, `get_builds`. |
-| Release key | A function-call access key of the developer account that can call only `add_build`. The release workflow holds it, not a full-access key. |
-| Product account | Each product has its own contract on a sub-account, here `demo.builddeed.testnet`. |
+| Products | One contract holds every product. A developer calls `add_product` with the key, name, prices, update period, royalty, payees and seats per license, and pays only for the storage of the record. Token ids are `<product>:<number>`, for example `doom:1`. |
+| Computer seats | `add_device` (owner only, storage paid by the owner), `remove_device`, `device_license(product, device_id, version)`. Three seats for each license; a resale clears them. The app reads its seat with a view call, so registration needs no license server and no callback to the app. |
+| Build record | `add_build` (append-only, per product), `find_artifact`, `get_builds`. The storage of a record comes from the product's storage balance (`add_storage`), because a function-call key cannot attach NEAR. |
+| Release key | A function-call access key of the developer account that can call only `add_build` on the license contract. The release workflow holds it, not a full-access key. |
 
 ## Repository
 
@@ -143,8 +143,8 @@ You need Podman.
 
 ```sh
 scripts/check.sh             # everything below, with rustfmt and clippy
-scripts/contract.sh test     # contract: 40 unit tests and the sandbox test
-scripts/app.sh test          # app: 21 tests (sign-in against a local fake RPC)
+scripts/contract.sh test     # contract: 81 unit tests and the sandbox test
+scripts/app.sh test          # app: 4 tests (seat check against a local fake RPC)
 scripts/app.sh linux         # app/target/x86_64-unknown-linux-gnu/release/builddeed-checksum
 scripts/app.sh windows       # app/target/x86_64-pc-windows-gnu/release/builddeed-checksum.exe
 scripts/package.sh           # dist/: .deb, .tar.gz, NSIS installer, SHA256SUMS
@@ -154,19 +154,24 @@ The website: `cd site && npm ci && npm run build` (Node 24).
 
 ### Deployed contract
 
-The contract on `demo.builddeed.testnet` has the code hash
-`426fc21cb10b4ffe16e1aad04ed1cbbc36a75a190d316d6861e786c70af2bdea`.
+The contract on `licenses.builddeed.testnet` has the code hash
+`5a07a60db3fd8134120efa2d1aa510278290abf5fb8de4a9253d68423a4cdb4e`.
 `scripts/contract.sh build` prints the same SHA-256.
 
 ## Trust model and limits
 
-- The developer holds a full-access key of the contract account and can
-  deploy new code. A future version locks the contract or gives upgrades to a
-  DAO.
+- BuildDeed holds a full-access key of the contract account and can deploy
+  new code. A future version puts upgrades behind a time lock, so that
+  owners see a change before it starts.
+- Developers cannot change the code or the fee. The BuildDeed fee is set
+  when the contract is created; no method changes it.
+- Products are isolated: a developer can record builds and change terms only
+  for their own product. Build records, file hashes and seats are kept per
+  product.
 - The developer can change the payees and the prices of future sales at any
   time. The renewal price is also the lowest resale price, so a developer who
-  raises it can price resales out of the market. The royalty and the
-  BuildDeed fee are fixed at deploy time.
+  raises it can price resales out of the market. The royalty and the seats
+  per license are fixed when the product is added.
 - A stolen release key can record a false build, or take a future version
   name. It cannot change or remove a recorded build, and it can add files to
   a version only in the 24 hours after the first record of that version.

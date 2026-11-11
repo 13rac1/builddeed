@@ -1,21 +1,32 @@
 //! BuildDeed license contract.
 //!
-//! One contract sells licenses for one product. A license is a NEP-171 token.
-//! It gives its owner the official builds that the developer releases at or
-//! before `updates_until_ms`. The owner keeps those builds after that time.
+//! One contract sells licenses for many products. A developer adds a product
+//! with `add_product` and sets its terms: price, renewal price, update
+//! period, royalty, payees and seats per license. Every license of every
+//! product is a token of one NEP-171 collection, with the token id
+//! `<product>:<number>`.
 //!
-//! The contract also keeps the record of the official builds: for each version,
-//! the commit and the SHA-256 of each artifact. The record is append-only.
+//! A license gives its owner the official builds of its product that the
+//! developer releases at or before `updates_until_ms`. The owner keeps those
+//! builds after that time.
+//!
+//! The contract keeps the record of the official builds of each product: for
+//! each version, the commit and the SHA-256 of each artifact. The record is
+//! append-only. Records, seats and artifact hashes are kept per product, so
+//! one developer cannot block or claim the files of another product.
 //!
 //! A license has up to `max_devices` computer seats. The owner registers a
-//! computer with `add_device`; the app finds its license with
+//! computer with `add_device`; the program finds its license with
 //! `device_license`. A resale clears the seats.
 //!
 //! A license changes owner only through the contract's market (`list` and
 //! `buy_listed`), so that each resale pays the royalty on the listed price.
 //! `nft_transfer` and `nft_transfer_call` are refused. A resale price is at
-//! least `renewal_price`, so that a listing at a token price cannot skip the
-//! royalty.
+//! least the renewal price, so that a listing at a token price cannot skip
+//! the royalty.
+//!
+//! The BuildDeed fee (`fee_bps` to `fee_account`) is set when the contract is
+//! created. No method changes it, and no developer can remove it.
 
 use near_contract_standards::non_fungible_token::core::NonFungibleTokenCore;
 use near_contract_standards::non_fungible_token::enumeration::NonFungibleTokenEnumeration;
@@ -38,13 +49,17 @@ const MS_PER_DAY: u64 = 24 * 60 * 60 * 1000;
 /// After this time from the first record of a version, the version is closed:
 /// `add_build` refuses new artifacts for it.
 pub const VERSION_OPEN_MS: u64 = MS_PER_DAY;
+/// The highest BuildDeed fee that `new` accepts: 10%.
+pub const MAX_FEE_BPS: u16 = 1_000;
 const MAX_ARTIFACTS: usize = 32;
 const MAX_URL: usize = 512;
 const MAX_NAME: usize = 64;
+const MAX_DESCRIPTION: usize = 280;
 const MAX_FILE: usize = 255;
 const MAX_PAGE: u32 = 100;
 const MAX_PAYEES: usize = 16;
 const MAX_DEVICES: u8 = 16;
+const MAX_VERSIONS: usize = 1_000;
 
 // The order of the variants is part of the stored state. Do not change it.
 #[derive(BorshStorageKey)]
@@ -54,8 +69,10 @@ enum StorageKey {
     TokenMetadata,
     Enumeration,
     ContractMetadata,
+    Products,
     Licenses,
     Builds,
+    Versions,
     ArtifactIndex,
     Listings,
     Devices,
@@ -71,14 +88,16 @@ pub struct Payee {
     pub bps: u16,
 }
 
-/// The sale terms of the product.
+/// The terms that a developer gives to `add_product`.
 #[near(serializers = [json, borsh])]
 #[derive(Clone, Debug)]
-pub struct Config {
-    /// The product name, for example "BuildDeed Checksum".
-    pub product: String,
-    /// The account that records builds and sets prices and payees.
-    pub developer: AccountId,
+pub struct ProductTerms {
+    /// The product name, for example "Iron Doom".
+    pub name: String,
+    /// One or two sentences for the website. At most 280 characters.
+    pub description: String,
+    /// The https URL of the source code or the product page.
+    pub url: Option<String>,
     /// The price of a new license.
     pub price: NearToken,
     /// The price to add one `update_period_days` to a license. It is also the
@@ -87,13 +106,55 @@ pub struct Config {
     pub update_period_days: u32,
     /// The part of a resale price that goes to `payees`, in basis points.
     pub royalty_bps: u16,
-    /// The BuildDeed fee account. It gets `fee_bps` of every payment.
-    pub fee_account: AccountId,
-    pub fee_bps: u16,
     /// The developer and the contributors.
     pub payees: Vec<Payee>,
     /// The number of computers that one license can register.
     pub max_devices: u8,
+}
+
+/// One product, as stored.
+#[near(serializers = [borsh])]
+#[derive(Clone, Debug)]
+pub struct Product {
+    pub terms: ProductTerms,
+    /// The account that added the product. It records builds and sets
+    /// prices and payees.
+    pub developer: AccountId,
+    pub next_token: u64,
+    /// NEAR that the developer paid for the storage of build records and
+    /// term changes. `add_build` takes its storage from here, because a
+    /// function-call key of a release pipeline cannot attach NEAR.
+    pub storage_balance: NearToken,
+}
+
+/// One product, as the views return it.
+#[near(serializers = [json])]
+#[derive(Clone, Debug)]
+pub struct ProductView {
+    pub key: String,
+    pub name: String,
+    pub description: String,
+    pub url: Option<String>,
+    pub developer: AccountId,
+    pub price: NearToken,
+    pub renewal_price: NearToken,
+    pub update_period_days: u32,
+    pub royalty_bps: u16,
+    pub payees: Vec<Payee>,
+    pub max_devices: u8,
+    pub fee_account: AccountId,
+    pub fee_bps: u16,
+    pub licenses_sold: u64,
+    pub storage_balance: NearToken,
+}
+
+/// The settings of the contract. `new` sets them; no method changes them.
+#[near(serializers = [json, borsh])]
+#[derive(Clone, Debug)]
+pub struct Settings {
+    /// The BuildDeed fee account. It gets `fee_bps` of every payment.
+    pub fee_account: AccountId,
+    pub fee_bps: u16,
 }
 
 /// The state of one license.
@@ -109,6 +170,7 @@ pub struct License {
 #[derive(Clone, Debug)]
 pub struct LicenseView {
     pub token_id: TokenId,
+    pub product: String,
     pub owner_id: AccountId,
     pub purchased_at_ms: u64,
     pub updates_until_ms: u64,
@@ -125,7 +187,7 @@ pub struct DeviceLicense {
     pub token_id: TokenId,
     pub owner_id: AccountId,
     pub updates_until_ms: u64,
-    /// True if the license covers the version that the app asked about.
+    /// True if the license covers the version that the program asked about.
     pub covers_version: bool,
 }
 
@@ -166,20 +228,23 @@ pub struct ArtifactMatch {
 }
 
 // The fields and their order are the stored state. Do not change them
-// without a state migration (see `migrate`).
+// without a state migration.
 #[near(contract_state)]
 #[derive(PanicOnDefault)]
 pub struct Contract {
     tokens: NonFungibleToken,
     metadata: LazyOption<NFTContractMetadata>,
-    config: Config,
-    next_token_id: u64,
+    settings: Settings,
+    products: IterableMap<String, Product>,
     licenses: LookupMap<TokenId, License>,
-    builds: IterableMap<String, Build>,
-    /// sha256 -> version
+    /// "<product>:<version>" -> build
+    builds: LookupMap<String, Build>,
+    /// product -> versions, in the order of their first record
+    versions: LookupMap<String, Vec<String>>,
+    /// "<product>:<sha256>" -> version
     artifact_index: LookupMap<String, String>,
     listings: IterableMap<TokenId, NearToken>,
-    /// device id -> token id
+    /// "<product>:<device id>" -> token id
     devices: LookupMap<String, TokenId>,
     /// token id -> device ids
     token_devices: LookupMap<TokenId, Vec<String>>,
@@ -188,12 +253,12 @@ pub struct Contract {
 #[near]
 impl Contract {
     #[init]
-    pub fn new(config: Config, symbol: String, icon: Option<String>) -> Self {
-        check_config(&config);
+    pub fn new(fee_account: AccountId, fee_bps: u16, icon: Option<String>) -> Self {
+        require!(fee_bps <= MAX_FEE_BPS, "The fee must be at most 10%");
         let metadata = NFTContractMetadata {
             spec: NFT_METADATA_SPEC.to_string(),
-            name: format!("{} license", config.product),
-            symbol,
+            name: "BuildDeed licenses".to_string(),
+            symbol: "DEED".to_string(),
             icon,
             base_uri: None,
             reference: None,
@@ -208,10 +273,14 @@ impl Contract {
                 None::<StorageKey>,
             ),
             metadata: LazyOption::new(StorageKey::ContractMetadata, Some(&metadata)),
-            config,
-            next_token_id: 1,
+            settings: Settings {
+                fee_account,
+                fee_bps,
+            },
+            products: IterableMap::new(StorageKey::Products),
             licenses: LookupMap::new(StorageKey::Licenses),
-            builds: IterableMap::new(StorageKey::Builds),
+            builds: LookupMap::new(StorageKey::Builds),
+            versions: LookupMap::new(StorageKey::Versions),
             artifact_index: LookupMap::new(StorageKey::ArtifactIndex),
             listings: IterableMap::new(StorageKey::Listings),
             devices: LookupMap::new(StorageKey::Devices),
@@ -219,57 +288,95 @@ impl Contract {
         }
     }
 
-    /// Upgrades the state of the first version (no computer seats) after a
-    /// deploy of this code. Only the contract account can call it. The
-    /// deploy and this call go in one transaction.
-    #[private]
-    #[init(ignore_state)]
-    pub fn migrate(max_devices: u8) -> Self {
-        let old: v1::Contract = env::state_read().expect("no state to migrate");
-        let c = old.config;
-        let config = Config {
-            product: c.product,
-            developer: c.developer,
-            price: c.price,
-            renewal_price: c.renewal_price,
-            update_period_days: c.update_period_days,
-            royalty_bps: c.royalty_bps,
-            fee_account: c.fee_account,
-            fee_bps: c.fee_bps,
-            payees: c.payees,
-            max_devices,
-        };
-        check_config(&config);
-        Self {
-            tokens: old.tokens,
-            metadata: old.metadata,
-            config,
-            next_token_id: old.next_token_id,
-            licenses: old.licenses,
-            builds: old.builds,
-            artifact_index: old.artifact_index,
-            listings: old.listings,
-            devices: LookupMap::new(StorageKey::Devices),
-            token_devices: LookupMap::new(StorageKey::TokenDevices),
-        }
+    // ----- Products -----
+
+    /// Adds a product. The caller becomes its developer. `key` is the short
+    /// name in token ids and links: 2 to 32 characters `a-z`, `0-9` and `-`,
+    /// starting with a letter or digit. Attach NEAR for storage: the product
+    /// record takes about 0.01 NEAR, and the rest becomes the product's
+    /// storage balance for build records (0.5 NEAR is enough for many
+    /// releases).
+    #[payable]
+    pub fn add_product(&mut self, key: String, terms: ProductTerms) -> ProductView {
+        require!(
+            is_product_key(&key),
+            "The product key must have 2 to 32 characters a-z, 0-9 and -, and start with a letter or digit"
+        );
+        require!(
+            !self.products.contains_key(&key),
+            "A product with this key exists"
+        );
+        self.check_terms(&terms);
+        let developer = env::predecessor_account_id();
+        let before = env::storage_usage();
+        self.products.insert(
+            key.clone(),
+            Product {
+                terms,
+                developer: developer.clone(),
+                next_token: 1,
+                storage_balance: NearToken::from_yoctonear(0),
+            },
+        );
+        self.products.flush();
+        let cost = storage_cost_since(before);
+        let rest = take_payment(cost);
+        let p = self.products.get_mut(&key).expect("inserted above");
+        p.storage_balance = rest;
+        let event = json!({
+            "standard": "builddeed",
+            "version": "1.0.0",
+            "event": "add_product",
+            "data": [{ "product": key, "developer": developer }],
+        });
+        env::log_str(&format!("EVENT_JSON:{event}"));
+        self.product_view(&key).expect("inserted above")
+    }
+
+    /// Adds NEAR to a product's storage balance. Anyone can pay.
+    #[payable]
+    pub fn add_storage(&mut self, product: String) -> NearToken {
+        let p = self.product_mut(&product);
+        p.storage_balance = p.storage_balance.saturating_add(env::attached_deposit());
+        p.storage_balance
+    }
+
+    /// Changes the prices of a product for new sales and renewals.
+    pub fn set_prices(&mut self, product: String, price: NearToken, renewal_price: NearToken) {
+        self.require_developer(&product);
+        let mut terms = self.product(&product).terms.clone();
+        terms.price = price;
+        terms.renewal_price = renewal_price;
+        self.check_terms(&terms);
+        self.update_terms(&product, terms);
+    }
+
+    /// Changes the developer and contributor shares of future sales.
+    pub fn set_payees(&mut self, product: String, payees: Vec<Payee>) {
+        self.require_developer(&product);
+        let mut terms = self.product(&product).terms.clone();
+        terms.payees = payees;
+        self.check_terms(&terms);
+        self.update_terms(&product, terms);
     }
 
     // ----- Sales -----
 
-    /// Buys a new license for the caller. Attach at least `price`; the
-    /// contract returns the excess.
+    /// Buys a new license of `product` for the caller. Attach at least the
+    /// price; the contract returns the excess.
     #[payable]
-    pub fn buy(&mut self) -> LicenseView {
+    pub fn buy(&mut self, product: String) -> LicenseView {
         let buyer = env::predecessor_account_id();
-        let price = self.config.price;
+        let p = self.product(&product).clone();
+        let price = p.terms.price;
         let excess = take_payment(price);
 
-        let token_id = self.next_token_id.to_string();
-        self.next_token_id += 1;
+        let token_id = format!("{product}:{}", p.next_token);
+        self.product_mut(&product).next_token += 1;
         let now = env::block_timestamp_ms();
         let license = License {
             purchased_at_ms: now,
-            updates_until_ms: now + self.period_ms(),
+            updates_until_ms: now + period_ms(&p.terms),
         };
 
         let storage_before = env::storage_usage();
@@ -277,7 +384,7 @@ impl Contract {
         // store::LookupMap writes at flush time. Flush now, so that the
         // measurement below includes the license record.
         self.licenses.flush();
-        let metadata = self.token_metadata(&token_id, &license);
+        let metadata = token_metadata(&p.terms.name, &token_id, &license);
         self.tokens.internal_mint_with_refund(
             token_id.clone(),
             buyer.clone(),
@@ -293,16 +400,16 @@ impl Contract {
         // The storage of the new license comes out of the price, before the split.
         self.pay_all(sale_split(
             price.saturating_sub(storage_cost),
-            self.config.fee_bps,
-            &self.config.fee_account,
-            &self.config.payees,
+            self.settings.fee_bps,
+            &self.settings.fee_account,
+            &p.terms.payees,
         ));
         pay(&buyer, excess);
         let event = json!({
             "standard": "builddeed",
             "version": "1.0.0",
             "event": "buy",
-            "data": [{ "token_id": token_id, "owner_id": buyer, "price": price }],
+            "data": [{ "token_id": token_id, "product": product, "owner_id": buyer, "price": price }],
         });
         env::log_str(&format!("EVENT_JSON:{event}"));
         self.license_view(&token_id)
@@ -318,7 +425,8 @@ impl Contract {
             self.owner_of(&token_id) == caller,
             "Only the owner can renew a license"
         );
-        let price = self.config.renewal_price;
+        let p = self.product(product_of(&token_id)).clone();
+        let price = p.terms.renewal_price;
         let excess = take_payment(price);
         let now = env::block_timestamp_ms();
         let mut license = self
@@ -326,25 +434,25 @@ impl Contract {
             .get(&token_id)
             .expect("every token has a license record")
             .clone();
-        license.updates_until_ms = license.updates_until_ms.max(now) + self.period_ms();
+        license.updates_until_ms = license.updates_until_ms.max(now) + period_ms(&p.terms);
         self.licenses.insert(token_id.clone(), license.clone());
-        let metadata = self.token_metadata(&token_id, &license);
+        let metadata = token_metadata(&p.terms.name, &token_id, &license);
         if let Some(map) = self.tokens.token_metadata_by_id.as_mut() {
             map.insert(&token_id, &metadata);
         }
         self.pay_all(sale_split(
             price,
-            self.config.fee_bps,
-            &self.config.fee_account,
-            &self.config.payees,
+            self.settings.fee_bps,
+            &self.settings.fee_account,
+            &p.terms.payees,
         ));
         pay(&caller, excess);
         self.license_view(&token_id).expect("the license exists")
     }
 
     /// Puts a license on the market for `price`, or changes its price. The
-    /// price must be at least `renewal_price`. Attach exactly 1 yoctoNEAR, so
-    /// that a function-call access key cannot list a license.
+    /// price must be at least the renewal price. Attach exactly 1 yoctoNEAR,
+    /// so that a function-call access key cannot list a license.
     #[payable]
     pub fn list(&mut self, token_id: TokenId, price: NearToken) {
         assert_one_yocto();
@@ -352,8 +460,9 @@ impl Contract {
             self.owner_of(&token_id) == env::predecessor_account_id(),
             "Only the owner can list a license"
         );
+        let floor = self.product(product_of(&token_id)).terms.renewal_price;
         require!(
-            price >= self.config.renewal_price,
+            price >= floor,
             "The resale price must be at least the renewal price"
         );
         self.listings.insert(token_id, price);
@@ -388,6 +497,7 @@ impl Contract {
         let seller = self.owner_of(&token_id);
         require!(buyer != seller, "The owner cannot buy their own license");
         let excess = take_payment(price);
+        let terms = self.product(product_of(&token_id)).terms.clone();
 
         self.listings.remove(&token_id);
         // The seller's computers lose the license; the buyer starts with no seats.
@@ -397,10 +507,10 @@ impl Contract {
 
         self.pay_all(resale_split(
             price,
-            self.config.fee_bps,
-            &self.config.fee_account,
-            self.config.royalty_bps,
-            &self.config.payees,
+            self.settings.fee_bps,
+            &self.settings.fee_account,
+            terms.royalty_bps,
+            &terms.payees,
             &seller,
         ));
         pay(&buyer, excess);
@@ -410,7 +520,7 @@ impl Contract {
     // ----- Computer seats -----
 
     /// Registers a computer on a license. Only the owner can do it, up to
-    /// `max_devices` computers. `device_id` is the 64-hex id that the app
+    /// `max_devices` computers. `device_id` is the 64-hex id that the program
     /// shows. Attach NEAR for the storage (0.01 NEAR is enough); the contract
     /// returns the excess.
     #[payable]
@@ -424,27 +534,29 @@ impl Contract {
             is_hex(&device_id, 64),
             "The device id must be 64 lowercase hex characters"
         );
-        if let Some(other) = self.devices.get(&device_id) {
+        let product = product_of(&token_id).to_string();
+        let seat_key = format!("{product}:{device_id}");
+        if let Some(other) = self.devices.get(&seat_key) {
             if *other == token_id {
                 env::panic_str("This computer is already registered on this license");
             }
             env::panic_str("This computer is registered on another license. Remove it there first");
         }
+        let max = self.product(&product).terms.max_devices;
         let mut list = self
             .token_devices
             .get(&token_id)
             .cloned()
             .unwrap_or_default();
-        if list.len() >= usize::from(self.config.max_devices) {
+        if list.len() >= usize::from(max) {
             env::panic_str(&format!(
-                "This license already has {} computers. Remove one first",
-                self.config.max_devices
+                "This license already has {max} computers. Remove one first"
             ));
         }
         let storage_before = env::storage_usage();
-        list.push(device_id.clone());
+        list.push(device_id);
         self.token_devices.insert(token_id.clone(), list);
-        self.devices.insert(device_id, token_id.clone());
+        self.devices.insert(seat_key, token_id.clone());
         self.token_devices.flush();
         self.devices.flush();
         let cost = storage_cost_since(storage_before);
@@ -470,7 +582,8 @@ impl Contract {
         let before = list.len();
         list.retain(|d| *d != device_id);
         require!(list.len() < before, "This computer is not on this license");
-        self.devices.remove(&device_id);
+        self.devices
+            .remove(&format!("{}:{device_id}", product_of(&token_id)));
         if list.is_empty() {
             self.token_devices.remove(&token_id);
         } else {
@@ -479,18 +592,23 @@ impl Contract {
         self.license_view(&token_id).expect("the license exists")
     }
 
-    /// The license that a computer is registered on, and whether it covers
-    /// `version`. None if the computer has no seat.
-    pub fn device_license(&self, device_id: String, version: String) -> Option<DeviceLicense> {
-        if !is_hex(&device_id, 64) || version.len() > MAX_NAME {
+    /// The license of `product` that a computer is registered on, and
+    /// whether it covers `version`. None if the computer has no seat.
+    pub fn device_license(
+        &self,
+        product: String,
+        device_id: String,
+        version: String,
+    ) -> Option<DeviceLicense> {
+        if !is_product_key(&product) || !is_hex(&device_id, 64) || version.len() > MAX_NAME {
             return None;
         }
-        let token_id = self.devices.get(&device_id)?.clone();
+        let token_id = self.devices.get(&format!("{product}:{device_id}"))?.clone();
         let owner_id = self.tokens.owner_by_id.get(&token_id)?;
         let l = self.licenses.get(&token_id)?;
         let covers_version = self
             .builds
-            .get(&version)
+            .get(&format!("{product}:{version}"))
             .is_some_and(|b| l.updates_until_ms >= b.released_at_ms);
         Some(DeviceLicense {
             token_id,
@@ -500,20 +618,24 @@ impl Contract {
         })
     }
 
-    // ----- Developer -----
+    // ----- Build records -----
 
-    /// Records an official build, or adds artifacts to a version in the first
-    /// 24 hours after its first record. A recorded artifact cannot be changed
-    /// or removed. The developer can give a function-call key that can call
-    /// only this method to the release pipeline.
+    /// Records an official build of `product`, or adds artifacts to a
+    /// version in the first 24 hours after its first record. A recorded
+    /// artifact cannot be changed or removed. Only the developer can call
+    /// it; the developer can give a function-call key that can call only
+    /// this method to the release pipeline. The storage comes out of the
+    /// product's storage balance (see `add_storage`).
     pub fn add_build(
         &mut self,
+        product: String,
         version: String,
         commit: String,
         artifacts: Vec<Artifact>,
     ) -> Build {
-        self.require_developer();
+        self.require_developer(&product);
         check_len(&version, MAX_NAME, "The version");
+        require!(!version.contains(':'), "The version cannot contain ':'");
         require!(
             is_hex(&commit, 40),
             "The commit must be 40 lowercase hex characters"
@@ -521,7 +643,9 @@ impl Contract {
         require!(!artifacts.is_empty(), "Give at least one artifact");
 
         let now = env::block_timestamp_ms();
-        let mut build = match self.builds.get(&version) {
+        let build_key = format!("{product}:{version}");
+        let before = env::storage_usage();
+        let mut build = match self.builds.get(&build_key) {
             Some(b) => {
                 require!(b.commit == commit, "This version has a different commit");
                 require!(
@@ -530,92 +654,130 @@ impl Contract {
                 );
                 b.clone()
             }
-            None => Build {
-                version: version.clone(),
-                commit,
-                released_at_ms: now,
-                artifacts: vec![],
-            },
+            None => {
+                let mut list = self.versions.get(&product).cloned().unwrap_or_default();
+                require!(
+                    list.len() < MAX_VERSIONS,
+                    "This product has too many versions"
+                );
+                list.push(version.clone());
+                self.versions.insert(product.clone(), list);
+                Build {
+                    version: version.clone(),
+                    commit,
+                    released_at_ms: now,
+                    artifacts: vec![],
+                }
+            }
         };
         for a in artifacts {
             check_artifact(&a);
-            if self.artifact_index.contains_key(&a.sha256) {
+            let index_key = format!("{product}:{}", a.sha256);
+            if self.artifact_index.contains_key(&index_key) {
                 env::panic_str(&format!("The artifact {} is already recorded", a.sha256));
             }
-            self.artifact_index
-                .insert(a.sha256.clone(), version.clone());
+            self.artifact_index.insert(index_key, version.clone());
             build.artifacts.push(a);
         }
         require!(
             build.artifacts.len() <= MAX_ARTIFACTS,
             "Too many artifacts for one version"
         );
-        self.builds.insert(version, build.clone());
+        self.builds.insert(build_key, build.clone());
+        self.versions.flush();
+        self.artifact_index.flush();
+        self.builds.flush();
+        self.charge_storage(&product, before);
         build
-    }
-
-    /// Changes the prices for new sales and renewals.
-    pub fn set_prices(&mut self, price: NearToken, renewal_price: NearToken) {
-        self.require_developer();
-        self.config.price = price;
-        self.config.renewal_price = renewal_price;
-        check_config(&self.config);
-    }
-
-    /// Changes the developer and contributor shares of future sales.
-    pub fn set_payees(&mut self, payees: Vec<Payee>) {
-        self.require_developer();
-        self.config.payees = payees;
-        check_config(&self.config);
     }
 
     // ----- Views -----
 
-    pub fn get_config(&self) -> Config {
-        self.config.clone()
+    pub fn get_settings(&self) -> Settings {
+        self.settings.clone()
+    }
+
+    pub fn get_product(&self, key: String) -> Option<ProductView> {
+        self.product_view(&key)
+    }
+
+    /// Products in the order they were added.
+    pub fn get_products(&self, from_index: Option<u32>, limit: Option<u32>) -> Vec<ProductView> {
+        self.products
+            .keys()
+            .skip(from_index.unwrap_or(0) as usize)
+            .take(page_limit(limit))
+            .filter_map(|k| self.product_view(k))
+            .collect()
     }
 
     pub fn get_license(&self, token_id: TokenId) -> Option<LicenseView> {
         self.license_view(&token_id)
     }
 
-    pub fn licenses_for_owner(&self, account_id: AccountId) -> Vec<LicenseView> {
+    /// The licenses of an account, of one product or of all products.
+    pub fn licenses_for_owner(
+        &self,
+        account_id: AccountId,
+        product: Option<String>,
+    ) -> Vec<LicenseView> {
         self.token_ids_of(&account_id)
             .iter()
+            .filter(|id| product.as_deref().is_none_or(|p| product_of(id) == p))
             .filter_map(|id| self.license_view(id))
             .collect()
     }
 
-    /// Licenses on the market, in storage order. The order changes when a
-    /// listing is removed.
-    pub fn get_listings(&self, from_index: Option<u32>, limit: Option<u32>) -> Vec<LicenseView> {
+    /// Licenses on the market, of one product or of all products, in storage
+    /// order. The order changes when a listing is removed. `from_index`
+    /// counts the listings after the product filter.
+    pub fn get_listings(
+        &self,
+        product: Option<String>,
+        from_index: Option<u32>,
+        limit: Option<u32>,
+    ) -> Vec<LicenseView> {
         self.listings
             .keys()
+            .filter(|id| product.as_deref().is_none_or(|p| product_of(id) == p))
             .skip(from_index.unwrap_or(0) as usize)
             .take(page_limit(limit))
             .filter_map(|id| self.license_view(id))
             .collect()
     }
 
-    pub fn get_build(&self, version: String) -> Option<Build> {
-        self.builds.get(&version).cloned()
+    pub fn get_build(&self, product: String, version: String) -> Option<Build> {
+        self.builds.get(&format!("{product}:{version}")).cloned()
     }
 
-    /// Builds in storage order (the order of their first record).
-    pub fn get_builds(&self, from_index: Option<u32>, limit: Option<u32>) -> Vec<Build> {
-        self.builds
-            .values()
-            .skip(from_index.unwrap_or(0) as usize)
-            .take(page_limit(limit))
-            .cloned()
-            .collect()
+    /// The builds of a product in the order of their first record.
+    pub fn get_builds(
+        &self,
+        product: String,
+        from_index: Option<u32>,
+        limit: Option<u32>,
+    ) -> Vec<Build> {
+        self.versions
+            .get(&product)
+            .map(|list| {
+                list.iter()
+                    .skip(from_index.unwrap_or(0) as usize)
+                    .take(page_limit(limit))
+                    .filter_map(|v| self.builds.get(&format!("{product}:{v}")).cloned())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
-    /// Finds the official build that contains a file with this SHA-256.
-    pub fn find_artifact(&self, sha256: String) -> Option<ArtifactMatch> {
+    /// Finds the official build of `product` that contains a file with this
+    /// SHA-256.
+    pub fn find_artifact(&self, product: String, sha256: String) -> Option<ArtifactMatch> {
         let sha256 = sha256.to_ascii_lowercase();
-        let version = self.artifact_index.get(&sha256)?;
-        let build = self.builds.get(version)?;
+        if !is_hex(&sha256, 64) {
+            return None;
+        }
+        let version = self.artifact_index.get(&format!("{product}:{sha256}"))?;
+        let build = self.builds.get(&format!("{product}:{version}"))?;
         let artifact = build.artifacts.iter().find(|a| a.sha256 == sha256)?.clone();
         Some(ArtifactMatch {
             version: build.version.clone(),
@@ -625,33 +787,98 @@ impl Contract {
         })
     }
 
-    /// True if `account_id` owns a license that covers `version`: a license
-    /// whose `updates_until_ms` is at or after the release time of the build.
-    pub fn is_entitled(&self, account_id: AccountId, version: String) -> bool {
+    /// True if `account_id` owns a license of `product` that covers
+    /// `version`: a license whose `updates_until_ms` is at or after the
+    /// release time of the build.
+    pub fn is_entitled(&self, account_id: AccountId, product: String, version: String) -> bool {
         if version.len() > MAX_NAME {
             return false;
         }
-        let Some(build) = self.builds.get(&version) else {
+        let Some(build) = self.builds.get(&format!("{product}:{version}")) else {
             return false;
         };
-        self.token_ids_of(&account_id).iter().any(|id| {
-            self.licenses
-                .get(id)
-                .is_some_and(|l| l.updates_until_ms >= build.released_at_ms)
-        })
+        self.token_ids_of(&account_id)
+            .iter()
+            .filter(|id| product_of(id) == product)
+            .any(|id| {
+                self.licenses
+                    .get(id)
+                    .is_some_and(|l| l.updates_until_ms >= build.released_at_ms)
+            })
     }
 
     // ----- Internal -----
 
-    fn require_developer(&self) {
+    fn product(&self, key: &str) -> &Product {
+        self.products
+            .get(key)
+            .unwrap_or_else(|| env::panic_str("No product has this key"))
+    }
+
+    fn product_mut(&mut self, key: &str) -> &mut Product {
+        self.products
+            .get_mut(key)
+            .unwrap_or_else(|| env::panic_str("No product has this key"))
+    }
+
+    fn require_developer(&self, product: &str) {
         require!(
-            env::predecessor_account_id() == self.config.developer,
-            "Only the developer can do this"
+            env::predecessor_account_id() == self.product(product).developer,
+            "Only the developer of this product can do this"
         );
     }
 
-    fn period_ms(&self) -> u64 {
-        u64::from(self.config.update_period_days) * MS_PER_DAY
+    fn check_terms(&self, t: &ProductTerms) {
+        check_terms(t, self.settings.fee_bps);
+    }
+
+    /// Stores new terms and charges a growth in storage to the product.
+    fn update_terms(&mut self, product: &str, terms: ProductTerms) {
+        let before = env::storage_usage();
+        self.product_mut(product).terms = terms;
+        self.products.flush();
+        self.charge_storage(product, before);
+    }
+
+    /// Takes the storage used since `before` from the product's storage
+    /// balance, or returns freed storage to it.
+    fn charge_storage(&mut self, product: &str, before: u64) {
+        let now = env::storage_usage();
+        let byte = env::storage_byte_cost();
+        let p = self.product_mut(product);
+        if now >= before {
+            let cost = byte.saturating_mul(u128::from(now - before));
+            require!(
+                p.storage_balance >= cost,
+                "The storage balance of this product is too low. Call add_storage"
+            );
+            p.storage_balance = p.storage_balance.saturating_sub(cost);
+        } else {
+            let freed = byte.saturating_mul(u128::from(before - now));
+            p.storage_balance = p.storage_balance.saturating_add(freed);
+        }
+    }
+
+    fn product_view(&self, key: &str) -> Option<ProductView> {
+        let p = self.products.get(key)?;
+        let t = &p.terms;
+        Some(ProductView {
+            key: key.to_string(),
+            name: t.name.clone(),
+            description: t.description.clone(),
+            url: t.url.clone(),
+            developer: p.developer.clone(),
+            price: t.price,
+            renewal_price: t.renewal_price,
+            update_period_days: t.update_period_days,
+            royalty_bps: t.royalty_bps,
+            payees: t.payees.clone(),
+            max_devices: t.max_devices,
+            fee_account: self.settings.fee_account.clone(),
+            fee_bps: self.settings.fee_bps,
+            licenses_sold: p.next_token - 1,
+            storage_balance: p.storage_balance,
+        })
     }
 
     fn owner_of(&self, token_id: &TokenId) -> AccountId {
@@ -675,6 +902,7 @@ impl Contract {
         let l = self.licenses.get(token_id)?;
         Some(LicenseView {
             token_id: token_id.clone(),
+            product: product_of(token_id).to_string(),
             owner_id,
             purchased_at_ms: l.purchased_at_ms,
             updates_until_ms: l.updates_until_ms,
@@ -688,37 +916,11 @@ impl Contract {
     }
 
     fn clear_devices(&mut self, token_id: &TokenId) {
+        let product = product_of(token_id).to_string();
         if let Some(list) = self.token_devices.remove(token_id) {
             for d in list {
-                self.devices.remove(&d);
+                self.devices.remove(&format!("{product}:{d}"));
             }
-        }
-    }
-
-    /// The token metadata holds a copy of the license period for wallets.
-    /// `buy` and `renew` write both, so that they stay the same.
-    fn token_metadata(&self, token_id: &TokenId, l: &License) -> TokenMetadata {
-        let extra = json!({
-            "product": self.config.product,
-            "purchased_at_ms": l.purchased_at_ms,
-            "updates_until_ms": l.updates_until_ms,
-        });
-        TokenMetadata {
-            title: Some(format!("{} license #{}", self.config.product, token_id)),
-            description: Some(format!(
-                "Gives the owner the official builds of {} released at or before the end of the update period.",
-                self.config.product
-            )),
-            media: None,
-            media_hash: None,
-            copies: None,
-            issued_at: Some(l.purchased_at_ms.to_string()),
-            expires_at: None,
-            starts_at: None,
-            updated_at: Some(env::block_timestamp_ms().to_string()),
-            extra: Some(extra.to_string()),
-            reference: None,
-            reference_hash: None,
         }
     }
 
@@ -726,6 +928,44 @@ impl Contract {
         for (account, amount) in payments {
             pay(&account, NearToken::from_yoctonear(amount));
         }
+    }
+}
+
+/// The product key of a token id: "doom:42" -> "doom".
+fn product_of(token_id: &str) -> &str {
+    token_id.split_once(':').map_or(token_id, |(p, _)| p)
+}
+
+fn period_ms(t: &ProductTerms) -> u64 {
+    u64::from(t.update_period_days) * MS_PER_DAY
+}
+
+/// The token metadata holds a copy of the license period for wallets.
+/// `buy` and `renew` write both, so that they stay the same.
+fn token_metadata(name: &str, token_id: &TokenId, l: &License) -> TokenMetadata {
+    let extra = json!({
+        "product": product_of(token_id),
+        "purchased_at_ms": l.purchased_at_ms,
+        "updates_until_ms": l.updates_until_ms,
+    });
+    let number = token_id
+        .split_once(':')
+        .map_or(token_id.as_str(), |(_, n)| n);
+    TokenMetadata {
+        title: Some(format!("{name} license #{number}")),
+        description: Some(format!(
+            "Gives the owner the official builds of {name} released at or before the end of the update period."
+        )),
+        media: None,
+        media_hash: None,
+        copies: None,
+        issued_at: Some(l.purchased_at_ms.to_string()),
+        expires_at: None,
+        starts_at: None,
+        updated_at: Some(env::block_timestamp_ms().to_string()),
+        extra: Some(extra.to_string()),
+        reference: None,
+        reference_hash: None,
     }
 }
 
@@ -866,37 +1106,55 @@ fn check_len(s: &str, max: usize, what: &str) {
     }
 }
 
-fn check_config(c: &Config) {
-    check_len(&c.product, MAX_NAME, "The product name");
-    require!(!c.price.is_zero(), "The price must be more than zero");
+/// 2 to 32 characters a-z, 0-9 and -, starting with a letter or digit.
+pub fn is_product_key(k: &str) -> bool {
+    (2..=32).contains(&k.len())
+        && k.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && !k.starts_with('-')
+}
+
+fn check_terms(t: &ProductTerms, fee_bps: u16) {
+    check_len(&t.name, MAX_NAME, "The product name");
     require!(
-        !c.renewal_price.is_zero(),
+        t.description.len() <= MAX_DESCRIPTION,
+        "The description must have at most 280 characters"
+    );
+    if let Some(url) = &t.url {
+        require!(
+            url.len() <= MAX_URL && url.starts_with("https://"),
+            "The URL must be https and at most 512 characters"
+        );
+    }
+    require!(!t.price.is_zero(), "The price must be more than zero");
+    require!(
+        !t.renewal_price.is_zero(),
         "The renewal price must be more than zero"
     );
     require!(
-        c.update_period_days > 0,
-        "The update period must be more than zero days"
+        t.update_period_days > 0 && t.update_period_days <= 36_500,
+        "The update period must be 1 to 36500 days"
     );
     require!(
-        u32::from(c.royalty_bps) + u32::from(c.fee_bps) <= BPS_TOTAL,
+        u32::from(t.royalty_bps) + u32::from(fee_bps) <= BPS_TOTAL,
         "The royalty and the fee together must be at most 100%"
     );
     require!(
-        !c.payees.is_empty() && c.payees.len() <= MAX_PAYEES,
+        !t.payees.is_empty() && t.payees.len() <= MAX_PAYEES,
         "Give 1 to 16 payees"
     );
     require!(
-        c.max_devices >= 1 && c.max_devices <= MAX_DEVICES,
+        t.max_devices >= 1 && t.max_devices <= MAX_DEVICES,
         "Give 1 to 16 computers for each license"
     );
-    let mut accounts: Vec<&AccountId> = c.payees.iter().map(|p| &p.account_id).collect();
+    let mut accounts: Vec<&AccountId> = t.payees.iter().map(|p| &p.account_id).collect();
     accounts.sort();
     accounts.dedup();
     require!(
-        accounts.len() == c.payees.len(),
+        accounts.len() == t.payees.len(),
         "Each payee account can appear only once"
     );
-    let total: u32 = c.payees.iter().map(|p| u32::from(p.bps)).sum();
+    let total: u32 = t.payees.iter().map(|p| u32::from(p.bps)).sum();
     require!(
         total == BPS_TOTAL,
         "The payee shares must add up to 10000 basis points"
@@ -952,36 +1210,6 @@ fn storage_cost_since(before: u64) -> NearToken {
 fn pay(to: &AccountId, amount: NearToken) {
     if !amount.is_zero() {
         Promise::new(to.clone()).transfer(amount).detach();
-    }
-}
-
-/// The stored state of the first version, for `migrate`.
-mod v1 {
-    use super::*;
-
-    #[near(serializers = [borsh])]
-    pub struct Config {
-        pub product: String,
-        pub developer: AccountId,
-        pub price: NearToken,
-        pub renewal_price: NearToken,
-        pub update_period_days: u32,
-        pub royalty_bps: u16,
-        pub fee_account: AccountId,
-        pub fee_bps: u16,
-        pub payees: Vec<Payee>,
-    }
-
-    #[near(serializers = [borsh])]
-    pub struct Contract {
-        pub tokens: NonFungibleToken,
-        pub metadata: LazyOption<NFTContractMetadata>,
-        pub config: Config,
-        pub next_token_id: u64,
-        pub licenses: LookupMap<TokenId, License>,
-        pub builds: IterableMap<String, Build>,
-        pub artifact_index: LookupMap<String, String>,
-        pub listings: IterableMap<TokenId, NearToken>,
     }
 }
 

@@ -43,12 +43,57 @@ async fn free_balance(a: &Account) -> anyhow::Result<(u128, u64)> {
     ))
 }
 
+async fn view(contract: &Contract, method: &str, args: Value) -> anyhow::Result<Value> {
+    Ok(contract.view(method).args_json(args).await?.json()?)
+}
+
+/// Records one build with one artifact.
+async fn add_build(
+    contract: &Contract,
+    dev: &Account,
+    product: &str,
+    commit: char,
+    sha256: char,
+) -> anyhow::Result<()> {
+    dev.call(contract.id(), "add_build")
+        .args_json(json!({
+            "product": product,
+            "version": "0.1.0",
+            "commit": commit.to_string().repeat(40),
+            "artifacts": [{
+                "platform": "linux-x86_64",
+                "file": "app.deb",
+                "sha256": sha256.to_string().repeat(64),
+                "attestation_url": null
+            }]
+        }))
+        .transact()
+        .await?
+        .into_result()?;
+    Ok(())
+}
+
+async fn is_entitled(
+    contract: &Contract,
+    account: &Account,
+    product: &str,
+) -> anyhow::Result<bool> {
+    let v = view(
+        contract,
+        "is_entitled",
+        json!({ "account_id": account.id(), "product": product, "version": "0.1.0" }),
+    )
+    .await?;
+    Ok(v.as_bool().expect("is_entitled returns a bool"))
+}
+
 #[tokio::test]
-async fn sale_resale_and_entitlement_on_sandbox() -> anyhow::Result<()> {
+async fn two_products_sale_resale_and_isolation_on_sandbox() -> anyhow::Result<()> {
     let worker = near_workspaces::sandbox().await?;
     let wasm = std::fs::read(wasm_path())?;
     let root = worker.root_account()?;
     let dev = new_account(&root, "dev").await?;
+    let dev2 = new_account(&root, "dev2").await?;
     let contrib = new_account(&root, "contrib").await?;
     let fee = new_account(&root, "fee").await?;
     let alice = new_account(&root, "alice").await?;
@@ -65,58 +110,123 @@ async fn sale_resale_and_entitlement_on_sandbox() -> anyhow::Result<()> {
 
     contract
         .call("new")
+        .args_json(json!({ "fee_account": fee.id(), "fee_bps": 300, "icon": null }))
+        .transact()
+        .await?
+        .into_result()?;
+
+    // Two developers add one product each.
+    let checksum: Value = dev
+        .call(contract.id(), "add_product")
         .args_json(json!({
-            "config": {
-                "product": "BuildDeed Checksum",
-                "developer": dev.id(),
+            "key": "checksum",
+            "terms": {
+                "name": "BuildDeed Checksum",
+                "description": "Checks the SHA-256 of a file.",
+                "url": "https://github.com/13rac1/builddeed",
                 "price": (5 * NEAR).to_string(),
                 "renewal_price": (2 * NEAR).to_string(),
                 "update_period_days": 365,
                 "royalty_bps": 1000,
-                "fee_account": fee.id(),
-                "fee_bps": 300,
                 "payees": [
                     { "account_id": dev.id(), "bps": 7000 },
                     { "account_id": contrib.id(), "bps": 3000 }
                 ],
                 "max_devices": 3
-            },
-            "symbol": "BDCK",
-            "icon": null
+            }
         }))
+        .deposit(NearToken::from_near(1))
         .transact()
         .await?
-        .into_result()?;
-
-    // The developer records a build.
-    dev.call(contract.id(), "add_build")
+        .into_result()?
+        .json()?;
+    assert_eq!(checksum["developer"], dev.id().as_str());
+    let checksum_balance: u128 = checksum["storage_balance"].as_str().unwrap().parse()?;
+    assert!(
+        checksum_balance > 0 && checksum_balance < NEAR,
+        "{checksum_balance}"
+    );
+    dev2.call(contract.id(), "add_product")
         .args_json(json!({
-            "version": "0.1.0",
-            "commit": "a".repeat(40),
-            "artifacts": [{
-                "platform": "linux-x86_64",
-                "file": "app.deb",
-                "sha256": "b".repeat(64),
-                "attestation_url": null
-            }]
+            "key": "doom",
+            "terms": {
+                "name": "Iron Doom",
+                "description": "",
+                "url": null,
+                "price": (3 * NEAR).to_string(),
+                "renewal_price": NEAR.to_string(),
+                "update_period_days": 30,
+                "royalty_bps": 500,
+                "payees": [{ "account_id": dev2.id(), "bps": 10000 }],
+                "max_devices": 1
+            }
         }))
+        .deposit(NearToken::from_near(1))
         .transact()
         .await?
         .into_result()?;
+    let products = view(&contract, "get_products", json!({})).await?;
+    assert_eq!(products[0]["key"], "checksum");
+    assert_eq!(products[1]["key"], "doom");
+    assert_eq!(products[1]["developer"], dev2.id().as_str());
+
+    // dev2 cannot record a build of dev's product.
+    let foreign = dev2
+        .call(contract.id(), "add_build")
+        .args_json(json!({
+            "product": "checksum",
+            "version": "0.1.0",
+            "commit": "c".repeat(40),
+            "artifacts": [{ "platform": "linux-x86_64", "file": "x.deb",
+                            "sha256": "e".repeat(64), "attestation_url": null }]
+        }))
+        .transact()
+        .await?;
+    let err = format!(
+        "{:?}",
+        foreign
+            .into_result()
+            .expect_err("a foreign add_build must fail")
+    );
+    assert!(err.contains("Only the developer of this product"), "{err}");
+
+    // Each developer records a build. The two builds contain the same file.
+    add_build(&contract, &dev, "checksum", 'a', 'b').await?;
+    add_build(&contract, &dev2, "doom", 'c', 'b').await?;
+    let after_build = view(&contract, "get_product", json!({ "key": "checksum" })).await?;
+    let after_build: u128 = after_build["storage_balance"].as_str().unwrap().parse()?;
+    assert!(
+        after_build < checksum_balance,
+        "the build storage comes from the storage balance"
+    );
+    for (product, commit) in [("checksum", 'a'), ("doom", 'c')] {
+        let m = view(
+            &contract,
+            "find_artifact",
+            json!({ "product": product, "sha256": "b".repeat(64) }),
+        )
+        .await?;
+        assert_eq!(m["commit"], commit.to_string().repeat(40), "{product}");
+    }
 
     // First sale: 3% fee, then 70/30 between developer and contributor.
     // The storage of the new license comes out of the price first.
+    // Let the gas refunds of dev2's calls arrive before the balance read.
+    worker.fast_forward(5).await?;
     let fee0 = balance(&fee).await?;
     let contrib0 = balance(&contrib).await?;
+    let dev2_0 = balance(&dev2).await?;
     let (free0, usage0) = free_balance(contract.as_account()).await?;
-    let out = alice
+    let license: Value = alice
         .call(contract.id(), "buy")
+        .args_json(json!({ "product": "checksum" }))
         .deposit(NearToken::from_near(6))
         .max_gas()
         .transact()
-        .await?;
-    let license: Value = out.clone().into_result()?.json()?;
-    assert_eq!(license["token_id"], "1");
+        .await?
+        .into_result()?
+        .json()?;
+    assert_eq!(license["token_id"], "checksum:1");
     let (free1, usage1) = free_balance(contract.as_account()).await?;
     let storage_cost = u128::from(usage1 - usage0) * BYTE_COST;
     let rest = 5 * NEAR - storage_cost;
@@ -131,44 +241,79 @@ async fn sale_resale_and_entitlement_on_sandbox() -> anyhow::Result<()> {
         (rest - fee_part) * 3000 / 10_000,
         "contributor share of the first sale"
     );
+    assert_eq!(
+        balance(&dev2).await?,
+        dev2_0,
+        "the other developer gets nothing"
+    );
     // The buyer pays the storage: the contract's free balance does not go down.
     assert!(free1 >= free0, "free balance went down: {free0} -> {free1}");
+    assert!(is_entitled(&contract, &alice, "checksum").await?);
+    assert!(
+        !is_entitled(&contract, &alice, "doom").await?,
+        "a license of checksum does not cover doom"
+    );
 
-    let entitled: bool = contract
-        .view("is_entitled")
-        .args_json(json!({ "account_id": alice.id(), "version": "0.1.0" }))
-        .await?
-        .json()?;
-    assert!(entitled);
-
-    // Alice registers a computer. She pays its storage: the contract's free
-    // balance does not go down.
-    let device = "d".repeat(64);
-    let (free_a, _) = free_balance(contract.as_account()).await?;
-    alice
-        .call(contract.id(), "add_device")
-        .args_json(json!({ "token_id": "1", "device_id": device }))
-        .deposit(NearToken::from_millinear(10))
+    // Alice also buys a license of doom: its numbers start at 1.
+    let doom: Value = alice
+        .call(contract.id(), "buy")
+        .args_json(json!({ "product": "doom" }))
+        .deposit(NearToken::from_near(3))
+        .max_gas()
         .transact()
         .await?
-        .into_result()?;
+        .into_result()?
+        .json()?;
+    assert_eq!(doom["token_id"], "doom:1");
+    let all = view(
+        &contract,
+        "licenses_for_owner",
+        json!({ "account_id": alice.id() }),
+    )
+    .await?;
+    assert_eq!(all.as_array().unwrap().len(), 2);
+    let only_doom = view(
+        &contract,
+        "licenses_for_owner",
+        json!({ "account_id": alice.id(), "product": "doom" }),
+    )
+    .await?;
+    assert_eq!(only_doom.as_array().unwrap().len(), 1);
+    assert_eq!(only_doom[0]["token_id"], "doom:1");
+
+    // Alice registers one computer on both licenses. She pays its storage:
+    // the contract's free balance does not go down.
+    let device = "d".repeat(64);
+    let (free_a, _) = free_balance(contract.as_account()).await?;
+    for token in ["checksum:1", "doom:1"] {
+        alice
+            .call(contract.id(), "add_device")
+            .args_json(json!({ "token_id": token, "device_id": device }))
+            .deposit(NearToken::from_millinear(10))
+            .transact()
+            .await?
+            .into_result()?;
+    }
     let (free_b, _) = free_balance(contract.as_account()).await?;
     assert!(
         free_b >= free_a,
         "free balance went down: {free_a} -> {free_b}"
     );
-    let seat: Value = contract
-        .view("device_license")
-        .args_json(json!({ "device_id": device, "version": "0.1.0" }))
-        .await?
-        .json()?;
-    assert_eq!(seat["owner_id"], alice.id().as_str());
-    assert_eq!(seat["covers_version"], true);
+    for (product, token) in [("checksum", "checksum:1"), ("doom", "doom:1")] {
+        let seat = view(
+            &contract,
+            "device_license",
+            json!({ "product": product, "device_id": device, "version": "0.1.0" }),
+        )
+        .await?;
+        assert_eq!(seat["token_id"], token);
+        assert_eq!(seat["owner_id"], alice.id().as_str());
+    }
 
     // A wallet transfer is refused with the market message.
     let refused = alice
         .call(contract.id(), "nft_transfer")
-        .args_json(json!({ "receiver_id": bob.id(), "token_id": "1" }))
+        .args_json(json!({ "receiver_id": bob.id(), "token_id": "checksum:1" }))
         .deposit(NearToken::from_yoctonear(1))
         .transact()
         .await?;
@@ -184,7 +329,7 @@ async fn sale_resale_and_entitlement_on_sandbox() -> anyhow::Result<()> {
     // A listing below the renewal price is refused.
     let low = alice
         .call(contract.id(), "list")
-        .args_json(json!({ "token_id": "1", "price": "1" }))
+        .args_json(json!({ "token_id": "checksum:1", "price": "1" }))
         .deposit(NearToken::from_yoctonear(1))
         .transact()
         .await?;
@@ -197,18 +342,23 @@ async fn sale_resale_and_entitlement_on_sandbox() -> anyhow::Result<()> {
     // Resale for 3 NEAR: 3% fee, 10% royalty split 70/30, 87% to the seller.
     alice
         .call(contract.id(), "list")
-        .args_json(json!({ "token_id": "1", "price": (3 * NEAR).to_string() }))
+        .args_json(json!({ "token_id": "checksum:1", "price": (3 * NEAR).to_string() }))
         .deposit(NearToken::from_yoctonear(1))
         .transact()
         .await?
         .into_result()?;
+    let listed = view(&contract, "get_listings", json!({ "product": "checksum" })).await?;
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    let none = view(&contract, "get_listings", json!({ "product": "doom" })).await?;
+    assert!(none.as_array().unwrap().is_empty());
     // Let the gas refund of the list call arrive before the balance read.
     worker.fast_forward(5).await?;
     let fee1 = balance(&fee).await?;
     let contrib1 = balance(&contrib).await?;
     let alice1 = balance(&alice).await?;
+    let dev2_1 = balance(&dev2).await?;
     bob.call(contract.id(), "buy_listed")
-        .args_json(json!({ "token_id": "1", "price": (3 * NEAR).to_string() }))
+        .args_json(json!({ "token_id": "checksum:1", "price": (3 * NEAR).to_string() }))
         .deposit(NearToken::from_near(3))
         .max_gas()
         .transact()
@@ -225,150 +375,38 @@ async fn sale_resale_and_entitlement_on_sandbox() -> anyhow::Result<()> {
         "contributor royalty"
     );
     assert_eq!(balance(&alice).await? - alice1, 261 * NEAR / 100, "seller");
-
-    let alice_now: bool = contract
-        .view("is_entitled")
-        .args_json(json!({ "account_id": alice.id(), "version": "0.1.0" }))
-        .await?
-        .json()?;
-    let bob_now: bool = contract
-        .view("is_entitled")
-        .args_json(json!({ "account_id": bob.id(), "version": "0.1.0" }))
-        .await?
-        .json()?;
-    assert!(!alice_now, "the seller is not entitled after the resale");
-    assert!(bob_now, "the buyer is entitled after the resale");
-    let seat: Value = contract
-        .view("device_license")
-        .args_json(json!({ "device_id": device, "version": "0.1.0" }))
-        .await?
-        .json()?;
-    assert!(seat.is_null(), "the resale cleared the seller's computer");
-    Ok(())
-}
-
-/// Upgrade from the code that is deployed on testnet (fixture, SHA-256
-/// 4b4e4201...) to this code, with the deploy and `migrate` in one
-/// transaction. Licenses, builds and the token counter must stay.
-#[tokio::test]
-async fn migrate_from_v1() -> anyhow::Result<()> {
-    let worker = near_workspaces::sandbox().await?;
-    let v1 = std::fs::read(format!(
-        "{}/tests/fixtures/builddeed_license_v1.wasm",
-        env!("CARGO_MANIFEST_DIR")
-    ))?;
-    let v2 = std::fs::read(wasm_path())?;
-    let root = worker.root_account()?;
-    let dev = new_account(&root, "dev").await?;
-    let fee = new_account(&root, "fee").await?;
-    let alice = new_account(&root, "alice").await?;
-    let contract: Contract = root
-        .create_subaccount("demo")
-        .initial_balance(NearToken::from_near(10))
-        .transact()
-        .await?
-        .into_result()?
-        .deploy(&v1)
-        .await?
-        .into_result()?;
-    contract
-        .call("new")
-        .args_json(json!({
-            "config": {
-                "product": "BuildDeed Checksum",
-                "developer": dev.id(),
-                "price": (5 * NEAR).to_string(),
-                "renewal_price": (2 * NEAR).to_string(),
-                "update_period_days": 365,
-                "royalty_bps": 1000,
-                "fee_account": fee.id(),
-                "fee_bps": 300,
-                "payees": [{ "account_id": dev.id(), "bps": 10000 }]
-            },
-            "symbol": "BDCK",
-            "icon": null
-        }))
-        .transact()
-        .await?
-        .into_result()?;
-    dev.call(contract.id(), "add_build")
-        .args_json(json!({
-            "version": "0.1.0",
-            "commit": "a".repeat(40),
-            "artifacts": [{ "platform": "linux-x86_64", "file": "app.deb",
-                            "sha256": "b".repeat(64), "attestation_url": null }]
-        }))
-        .transact()
-        .await?
-        .into_result()?;
-    alice
-        .call(contract.id(), "buy")
-        .deposit(NearToken::from_near(5))
-        .max_gas()
-        .transact()
-        .await?
-        .into_result()?;
-
-    // Deploy and migrate in one transaction.
-    contract
-        .as_account()
-        .batch(contract.id())
-        .deploy(&v2)
-        .call(
-            near_workspaces::operations::Function::new("migrate")
-                .args_json(json!({ "max_devices": 3 }))
-                .max_gas(),
-        )
-        .transact()
-        .await?
-        .into_result()?;
-
-    let config: Value = contract.view("get_config").await?.json()?;
-    assert_eq!(config["max_devices"], 3);
-    assert_eq!(config["product"], "BuildDeed Checksum");
-    let license: Value = contract
-        .view("get_license")
-        .args_json(json!({ "token_id": "1" }))
-        .await?
-        .json()?;
-    assert_eq!(license["owner_id"], alice.id().as_str(), "license 1 kept");
-    let build: Value = contract
-        .view("get_build")
-        .args_json(json!({ "version": "0.1.0" }))
-        .await?
-        .json()?;
-    assert_eq!(build["commit"], "a".repeat(40), "build record kept");
-
-    // The token counter is kept: the next license is #2.
-    let next: Value = alice
-        .call(contract.id(), "buy")
-        .deposit(NearToken::from_near(5))
-        .max_gas()
-        .transact()
-        .await?
-        .into_result()?
-        .json()?;
-    assert_eq!(next["token_id"], "2");
-
-    // Seats work after the migration.
-    alice
-        .call(contract.id(), "add_device")
-        .args_json(json!({ "token_id": "1", "device_id": "e".repeat(64) }))
-        .deposit(NearToken::from_millinear(10))
-        .transact()
-        .await?
-        .into_result()?;
-
-    // Only the contract account can call migrate.
-    let again = alice
-        .call(contract.id(), "migrate")
-        .args_json(json!({ "max_devices": 3 }))
-        .transact()
-        .await?;
-    let err = format!(
-        "{:?}",
-        again.into_result().expect_err("migrate must be private")
+    assert_eq!(
+        balance(&dev2).await?,
+        dev2_1,
+        "no royalty to the other product"
     );
-    assert!(err.contains("private"), "{err}");
+
+    assert!(
+        !is_entitled(&contract, &alice, "checksum").await?,
+        "the seller is not entitled after the resale"
+    );
+    assert!(
+        is_entitled(&contract, &bob, "checksum").await?,
+        "the buyer is entitled after the resale"
+    );
+    assert!(
+        is_entitled(&contract, &alice, "doom").await?,
+        "the seller keeps her license of doom"
+    );
+    let seat = view(
+        &contract,
+        "device_license",
+        json!({ "product": "checksum", "device_id": device, "version": "0.1.0" }),
+    )
+    .await?;
+    assert!(seat.is_null(), "the resale cleared the seller's computer");
+    let seat = view(
+        &contract,
+        "device_license",
+        json!({ "product": "doom", "device_id": device, "version": "0.1.0" }),
+    )
+    .await?;
+    assert_eq!(seat["token_id"], "doom:1", "the seat in doom stays");
+    assert_eq!(seat["covers_version"], true);
     Ok(())
 }

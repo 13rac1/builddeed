@@ -31,7 +31,8 @@ type Registration = builddeed::Seat;
 
 const PRODUCT: &str = "BuildDeed Checksum";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-const CONTRACT: &str = "demo.builddeed.testnet";
+const CONTRACT: &str = builddeed::OFFICIAL_TESTNET_CONTRACT;
+const PRODUCT_KEY: &str = "checksum";
 const SITE_URL: &str = "https://13rac1.github.io/builddeed";
 const EXPLORER: &str = "https://testnet.nearblocks.io/address";
 /// Earlier versions kept the last license check in this file for offline
@@ -487,7 +488,7 @@ impl eframe::App for App {
 
 /// The product that this app sells.
 fn product() -> Product {
-    Product::testnet(CONTRACT, "demo", VERSION).with_site_url(SITE_URL)
+    Product::testnet(CONTRACT, PRODUCT_KEY, VERSION).with_site_url(SITE_URL)
 }
 
 fn check_folder(path: &std::path::Path) -> Result<(String, PathBuf), String> {
@@ -545,18 +546,17 @@ mod tests {
     use builddeed::fake_rpc;
 
     #[test]
-    fn product_is_the_demo_contract_and_this_version() {
+    fn product_is_checksum_in_the_official_contract() {
         let p = product();
         assert_eq!(
             (p.contract.as_str(), p.key.as_str()),
-            ("demo.builddeed.testnet", "demo")
+            ("licenses.builddeed.testnet", "checksum")
         );
         assert_eq!(p.version, VERSION);
         let c = Client::with_device(p, "a".repeat(64));
-        assert!(c
-            .register_url()
-            .unwrap()
-            .starts_with(&format!("{SITE_URL}/register.html#product=demo&device=")));
+        assert!(c.register_url().unwrap().starts_with(&format!(
+            "{SITE_URL}/register.html#product=checksum&device="
+        )));
     }
 
     #[test]

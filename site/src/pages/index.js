@@ -1,5 +1,5 @@
 import { h, mountChrome } from "../ui.js";
-import { view, viewOf, formatNear, PRODUCT, PRODUCTS, pageLink } from "../near.js";
+import { formatNear, loadProducts, pageLink, PRODUCT_KEY } from "../near.js";
 
 mountChrome();
 document.getElementById("verify-link").href = pageLink("verify.html");
@@ -33,56 +33,37 @@ cont.addEventListener("click", () => {
 
 // ----- Product cards -----
 
-const PRODUCT_INFO = {
-  demo: {
-    shot: "img/checksum-nag.webp",
-    alt: "BuildDeed Checksum showing its UNREGISTERED COPY screen",
-    tags: ["Rust", "egui", "Linux · Windows · macOS"],
-    text: "A file checksum tool. Drop a file to see its SHA-256 and its official build record. Registered: the folder check, which reports what changed since the last check.",
-    pixel: false,
-  },
-  doom: {
-    shot: "img/doom-title.webp",
-    alt: "Iron Doom title screen with the shareware box: unregistered, press R to register this computer",
-    tags: ["Rust", "Bevy", "GPL-3.0", "Freedoom inside"],
-    text: "A Doom source port in Rust. Unregistered: E1M1 and the shareware screen. Press R on the title screen to register this computer; registered, 1-9 warp to any map.",
-    pixel: true,
-  },
-};
-
 const cards = document.getElementById("product-cards");
-for (const p of Object.values(PRODUCTS)) {
-  const info = PRODUCT_INFO[p.key];
-  const price = h("span", { class: "pill" }, "…");
-  cards.append(
+
+function productCard(p) {
+  // A product without local display data gets a card without a picture.
+  const tags = [`${formatNear(p.price)} NEAR · ${p.max_devices} seats`, ...(p.tags || [])];
+  const github = p.repo && p.repo.startsWith("https://github.com/");
+  return h(
+    "article",
+    { class: "card product" },
+    p.shot
+      ? h("div", { class: p.pixel ? "shot pixel" : "shot" }, h("img", { src: p.shot, alt: p.alt, loading: "lazy", width: 640, height: 480 }))
+      : null,
     h(
-      "article",
-      { class: "card product" },
-      h("div", { class: info.pixel ? "shot pixel" : "shot" }, h("img", { src: info.shot, alt: info.alt, loading: "lazy", width: 640, height: 480 })),
+      "div",
+      { class: "content" },
+      h("h3", {}, p.name),
+      h("div", { class: "tags" }, tags.map((t) => h("span", { class: "pill" }, t))),
+      h("p", { class: "muted" }, p.text || p.description),
       h(
         "div",
-        { class: "content" },
-        h("h3", {}, p.name),
-        h("div", { class: "tags" }, price, info.tags.map((t) => h("span", { class: "pill" }, t))),
-        h("p", { class: "muted" }, info.text),
-        h(
-          "div",
-          { class: "links" },
-          h("a", { class: "btn small", href: pageLink("buy.html", p) }, "Buy a license"),
-          h("a", { class: "btn small ghost", href: `${p.repo}/releases/latest` }, "Download"),
-          h("a", { href: p.repo }, "Source")
-        )
+        { class: "links" },
+        h("a", { class: "btn small", href: pageLink("buy.html", p) }, "Buy a license"),
+        github ? h("a", { class: "btn small ghost", href: `${p.repo}/releases/latest` }, "Download") : null,
+        p.repo ? h("a", { href: p.repo }, github ? "Source" : "Product page") : null
       )
     )
   );
-  viewOf(p, "get_config")
-    .then((c) => (price.textContent = `${formatNear(c.price)} NEAR · ${c.max_devices} seats`))
-    .catch(() => (price.textContent = "testnet"));
 }
 
 // ----- Where the money goes -----
 
-document.getElementById("money-product").textContent = PRODUCT.name;
 const COLORS = ["var(--seg-3)", "var(--seg-1)", "var(--seg-2)", "var(--seg-4)", "#7c3aed", "#db2777"];
 
 function bar(title, total, parts) {
@@ -113,8 +94,11 @@ function bar(title, total, parts) {
   );
 }
 
-view("get_config")
-  .then((c) => {
+loadProducts()
+  .then((products) => {
+    cards.replaceChildren(...products.map(productCard));
+    const c = products.find((p) => p.key === PRODUCT_KEY) || products[0];
+    document.getElementById("money-product").textContent = c.name;
     const price = BigInt(c.price);
     const fee = (price * BigInt(c.fee_bps)) / 10000n;
     const rest = price - fee;
@@ -131,8 +115,12 @@ view("get_config")
       { label: "Seller", amount: resalePrice - rFee - royalty },
     ];
     document.getElementById("money-bars").replaceChildren(
-      bar(`First sale of a ${c.product} license`, price, first),
+      bar(`First sale of a ${c.name} license`, price, first),
       bar("A resale at 3 NEAR", resalePrice, resale)
     );
   })
-  .catch((e) => document.getElementById("money-bars").replaceChildren(h("p", { class: "warn-text" }, `Cannot read the contract: ${e.message}`)));
+  .catch((e) => {
+    const msg = `Cannot read the contract: ${e.message}`;
+    cards.replaceChildren(h("p", { class: "warn-text" }, msg));
+    document.getElementById("money-bars").replaceChildren(h("p", { class: "warn-text" }, msg));
+  });
