@@ -21,18 +21,18 @@ const EXTRAS = {
     pixel: false,
   },
   doom: {
-    shot: "img/doom-title.webp",
-    alt: "Iron Doom title screen with the shareware box: unregistered, press R to register this computer",
-    tags: ["Rust", "Bevy", "GPL-3.0", "Freedoom inside"],
-    text: "A Doom source port in Rust. Unregistered: E1M1 and the shareware screen. Press R on the title screen to register this computer; registered, 1-9 warp to any map.",
+    shot: "img/doom-play.webp",
+    alt: "Room4Doom with Freedoom: the shotgun, health 85 and a defeated monster in E1M1",
+    tags: ["Rust", "GPL-2.0-or-later", "Freedoom inside"],
+    text: "It runs Doom. A Doom engine in Rust with monsters, weapons and sound. Unregistered: E1M1. Press R in the game to register this computer; a license unlocks every episode and map.",
     pixel: true,
   },
 };
 
 /** The repository of BuildDeed itself. */
 export const BUILDDEED_REPO = "https://github.com/13rac1/builddeed";
-/** The repository of Iron Doom, for the footer. */
-export const IRON_DOOM_REPO = "https://github.com/ai-13rac1/iron-doom";
+/** The repository of Room4Doom, for the footer. */
+export const ROOM4DOOM_REPO = "https://github.com/ai-13rac1/room4doom";
 export const RPC = "https://rpc.testnet.fastnear.com";
 export const EXPLORER = "https://testnet.nearblocks.io";
 export const FAUCET = "https://near-faucet.io/";

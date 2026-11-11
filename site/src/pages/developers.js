@@ -1,7 +1,7 @@
 import { h, mountChrome, busy, showOk } from "../ui.js";
 import {
   BUILDDEED_REPO,
-  IRON_DOOM_REPO,
+  ROOM4DOOM_REPO,
   CONTRACT,
   view,
   call,
@@ -449,8 +449,8 @@ main.replaceChildren(
     "Two working integrations show the whole flow: ",
     h("a", { href: `${BUILDDEED_REPO}/tree/main/app` }, "BuildDeed Checksum"),
     " (egui) and ",
-    h("a", { href: IRON_DOOM_REPO }, "Iron Doom"),
-    " (Bevy, registration from the title screen). Both use the ",
+    h("a", { href: ROOM4DOOM_REPO }, "Room4Doom"),
+    " (a complete Doom engine; R in the game registers). Both use the ",
     h("a", { href: "https://github.com/13rac1/builddeed-sdk" }, "BuildDeed SDK"),
     " (Rust, Apache-2.0; a Bevy plugin is included). Its spec and test data let you write the same check in another language. AI agents can buy, register and download with no browser: see the ",
     h("a", { href: "agents.md" }, "guide for agents"),

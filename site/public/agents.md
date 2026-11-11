@@ -24,7 +24,7 @@ on the market; each sale pays the developers and contributors.
 | RPC | `https://rpc.testnet.fastnear.com` (JSON-RPC, a public shared service) |
 | Amounts | yoctoNEAR as decimal strings: 1 NEAR = `"1000000000000000000000000"` |
 | Token ids | `<product>:<n>`, for example `checksum:1` |
-| Products | `checksum` (BuildDeed Checksum) and `doom` (Iron Doom); `get_products` lists all |
+| Products | `checksum` (BuildDeed Checksum) and `doom` (Room4Doom); `get_products` lists all |
 | Protocol spec | <https://github.com/13rac1/builddeed-sdk/blob/main/spec/README.md> |
 
 The RPC is shared with other people. Send one request at a time, and back off
@@ -132,7 +132,7 @@ The file that each platform gets on testnet (BuildDeed Checksum 0.1.2):
 | `windows-x86_64` | the installer, `builddeed-checksum-<v>-windows-x86_64-setup.exe` | run it |
 | `macos-aarch64` | the program itself, `builddeed-checksum-<v>-macos-aarch64` | `chmod +x` it |
 
-Iron Doom has no recorded build yet: `latest_build` returns `null` for it.
+Room4Doom has no recorded build yet: `latest_build` returns `null` for it.
 
 ### find_artifact
 

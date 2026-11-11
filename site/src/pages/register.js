@@ -78,7 +78,7 @@ function presenceNote() {
         "div",
         { class: "card" },
         h("p", { class: "warn-text" }, "This link is for another computer. Do not register it."),
-        h("p", { class: "muted" }, `To register this computer, open ${PRODUCT.name} here and use "I have a license" (R on the Iron Doom title screen).`)
+        h("p", { class: "muted" }, `To register this computer, open ${PRODUCT.name} here and use "I have a license" (R in Room4Doom).`)
       );
     default: {
       const input = h("input", {
@@ -137,7 +137,7 @@ function invalid() {
   main.replaceChildren(
     h("div", { class: "page-head" }, h("h1", {}, "Register a computer")),
     h("p", { class: "warn-text" }, "This link has no valid computer id."),
-    h("p", {}, 'Open this page from the program: click "I have a license" (R on the Iron Doom title screen).')
+    h("p", {}, 'Open this page from the program: click "I have a license" (R in Room4Doom).')
   );
 }
 

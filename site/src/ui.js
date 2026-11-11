@@ -7,7 +7,7 @@ import {
   signIn,
   signOut,
   BUILDDEED_REPO,
-  IRON_DOOM_REPO,
+  ROOM4DOOM_REPO,
   CONTRACT,
   PRODUCT_KEY,
   loadProducts,
@@ -136,7 +136,7 @@ export function mountChrome() {
             "ul",
             {},
             link(BUILDDEED_REPO, "BuildDeed on GitHub"),
-            link(IRON_DOOM_REPO, "Iron Doom on GitHub"),
+            link(ROOM4DOOM_REPO, "Room4Doom on GitHub"),
             link(accountLink(CONTRACT), `License collection ${CONTRACT}`),
             link("https://nearhackathon.com/", "NEAR HACKATHON")
           )
@@ -146,7 +146,7 @@ export function mountChrome() {
         "p",
         { class: "fine" },
         "Testnet demo built at NEAR HACKATHON 2026 by Hardened Minds. Testnet NEAR has no value. ",
-        "BuildDeed is under the Business Source License 1.1; Iron Doom is under the GPL-3.0."
+        "BuildDeed is under the Business Source License 1.1; Room4Doom is under the GPL-2.0-or-later."
       )
     )
   );
