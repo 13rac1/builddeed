@@ -274,7 +274,7 @@ on success. On a failure it prints `{"error": "..."}` and exits with 1.
 1. **Install.**
 
    ```sh
-   cargo install --locked --git https://github.com/13rac1/builddeed-sdk --tag rust-v0.1.0 builddeed --bin builddeed
+   cargo install --locked --git https://github.com/13rac1/builddeed-sdk --tag rust-v0.1.1 builddeed --bin builddeed
    ```
 
 2. **Read the budget** and the owner's licenses of the product.

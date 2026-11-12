@@ -96,11 +96,11 @@ main.replaceChildren(
     " (Apache-2.0) checks the license at each start, opens the register page with the presence check, and shows the confirmation code. Its spec and test data let you write the same check in another language."
   ),
   h("h3", {}, "Rust"),
-  code(`cargo add builddeed --git ${SDK_REPO} --tag rust-v0.1.0`),
+  code(`cargo add builddeed --git ${SDK_REPO} --tag rust-v0.1.1`),
   h("p", { class: "muted small" }, "A Bevy plugin is in the bevy feature. The builddeed command line tool for agents and CI is in the same crate."),
   h("h3", {}, "Go"),
-  code("go get github.com/13rac1/builddeed-sdk/go@v0.1.0"),
-  h("p", { class: "muted small" }, "The tag in the repository is go/v0.1.0. The module uses the Go standard library only."),
+  code("go get github.com/13rac1/builddeed-sdk/go@v0.1.1"),
+  h("p", { class: "muted small" }, "The tag in the repository is go/v0.1.1. The module uses the Go standard library only."),
   h(
     "p",
     {},
