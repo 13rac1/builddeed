@@ -950,21 +950,21 @@ impl Contract {
         self.budgets.get(&account_id).cloned()
     }
 
-    /// The last recorded build of `product` that has a file for `platform`
-    /// (for example "linux-x86_64"), and that file. With more than one file
-    /// for the platform, the first recorded one: the release records its
-    /// main download for each platform first.
+    /// The file for `platform` (for example "linux-x86_64") in the last
+    /// recorded build of `product`, or None when that build has no file for
+    /// the platform. An older build is never offered: its program can be
+    /// another one. With more than one file for the platform, the first
+    /// recorded one: the release records its main download for each
+    /// platform first.
     pub fn latest_build(&self, product: String, platform: String) -> Option<ArtifactMatch> {
-        let list = self.versions.get(&product)?;
-        list.iter().rev().find_map(|v| {
-            let b = self.builds.get(&format!("{product}:{v}"))?;
-            let artifact = b.artifacts.iter().find(|a| a.platform == platform)?.clone();
-            Some(ArtifactMatch {
-                version: b.version.clone(),
-                commit: b.commit.clone(),
-                released_at_ms: b.released_at_ms,
-                artifact,
-            })
+        let version = self.versions.get(&product)?.last()?;
+        let b = self.builds.get(&format!("{product}:{version}"))?;
+        let artifact = b.artifacts.iter().find(|a| a.platform == platform)?.clone();
+        Some(ArtifactMatch {
+            version: b.version.clone(),
+            commit: b.commit.clone(),
+            released_at_ms: b.released_at_ms,
+            artifact,
         })
     }
 

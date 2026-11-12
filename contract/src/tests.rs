@@ -1408,7 +1408,7 @@ fn for_platform(c: char, platform: &str) -> Artifact {
 }
 
 #[test]
-fn latest_build_gives_the_newest_version_with_a_file_for_the_platform() {
+fn latest_build_gives_only_files_of_the_last_recorded_version() {
     let mut c = setup_two();
     call("dev.near", yocto(0), 5_000);
     c.add_build(
@@ -1428,14 +1428,8 @@ fn latest_build_gives_the_newest_version_with_a_file_for_the_platform() {
         vec![
             for_platform('c', "linux-x86_64"),
             for_platform('e', "linux-x86_64"),
+            for_platform('d', "macos-aarch64"),
         ],
-    );
-    call("dev.near", yocto(0), 7_000);
-    c.add_build(
-        P.into(),
-        "0.3.0".into(),
-        commit('c'),
-        vec![for_platform('d', "macos-aarch64")],
     );
     // A newer build of the other product does not count.
     call("dev2.near", yocto(0), 8_000);
@@ -1457,13 +1451,11 @@ fn latest_build_gives_the_newest_version_with_a_file_for_the_platform() {
     assert_eq!(linux.released_at_ms, 6_000);
     assert_eq!(linux.artifact.sha256, sha('c'), "the first file recorded");
     assert_eq!(linux.artifact.url, artifact('c').url);
-    let windows = latest(&c, P, "windows-x86_64").expect("windows build");
-    assert_eq!(
-        (windows.version.as_str(), windows.artifact.sha256),
-        ("0.1.0", sha('b'))
+    assert_eq!(latest(&c, P, "macos-aarch64").unwrap().version, "0.2.0");
+    assert!(
+        latest(&c, P, "windows-x86_64").is_none(),
+        "the windows file of an older version is not offered"
     );
-    let mac = latest(&c, P, "macos-aarch64").expect("macos build");
-    assert_eq!(mac.version, "0.3.0");
     assert!(
         latest(&c, P, "freebsd-x86_64").is_none(),
         "unknown platform"
@@ -1477,7 +1469,7 @@ fn latest_build_gives_the_newest_version_with_a_file_for_the_platform() {
 }
 
 #[test]
-fn latest_build_takes_files_added_to_a_version_in_its_first_day() {
+fn latest_build_ignores_files_added_later_to_an_older_version() {
     let mut c = setup();
     call("dev.near", yocto(0), 5_000);
     c.add_build(
@@ -1500,12 +1492,7 @@ fn latest_build_takes_files_added_to_a_version_in_its_first_day() {
         commit('a'),
         vec![for_platform('c', "windows-x86_64")],
     );
-    assert_eq!(
-        c.latest_build(P.into(), "windows-x86_64".into())
-            .unwrap()
-            .version,
-        "0.1.0"
-    );
+    assert!(c.latest_build(P.into(), "windows-x86_64".into()).is_none());
     assert_eq!(
         c.latest_build(P.into(), "linux-x86_64".into())
             .unwrap()
