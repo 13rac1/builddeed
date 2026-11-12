@@ -43,7 +43,7 @@ const PRODUCT: &str = "BuildDeed Checksum";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const CONTRACT: &str = builddeed::OFFICIAL_TESTNET_CONTRACT;
 const PRODUCT_KEY: &str = "checksum";
-const SITE_URL: &str = "https://13rac1.github.io/builddeed";
+const SITE_URL: &str = "https://builddeed.dev";
 const EXPLORER: &str = "https://testnet.nearblocks.io/address";
 /// Earlier versions kept the last license check in this file for offline
 /// use. The app no longer reads it, and removes it.
@@ -478,8 +478,8 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_about_line(
         format!("{PRODUCT} {VERSION}. License contract {CONTRACT} on NEAR testnet.").into(),
     );
-    ui.set_licenses_url(format!("{SITE_URL}/licenses.html").into());
-    ui.set_verify_url(format!("{SITE_URL}/verify.html").into());
+    ui.set_licenses_url(format!("{SITE_URL}/licenses/").into());
+    ui.set_verify_url(format!("{SITE_URL}/verify/").into());
     ui.set_contract_url(format!("{EXPLORER}/{CONTRACT}").into());
 
     let app = Rc::new(RefCell::new(App::new(&ui)));
@@ -605,9 +605,10 @@ mod tests {
         );
         assert_eq!(p.version, VERSION);
         let c = Client::with_device(p, "a".repeat(64));
-        assert!(c.register_url().unwrap().starts_with(&format!(
-            "{SITE_URL}/register.html#product=checksum&device="
-        )));
+        assert!(c
+            .register_url()
+            .unwrap()
+            .starts_with(&format!("{SITE_URL}/register/#product=checksum&device=")));
     }
 
     #[test]

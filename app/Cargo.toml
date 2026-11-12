@@ -1,6 +1,6 @@
 [package]
 name = "builddeed-checksum"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 license = "BUSL-1.1"
 repository = "https://github.com/13rac1/builddeed"
@@ -8,7 +8,7 @@ description = "BuildDeed Checksum: a file checksum tool sold as shareware with a
 
 [dependencies]
 # The BuildDeed SDK, pinned to a commit.
-builddeed = { git = "https://github.com/13rac1/builddeed-sdk", rev = "b137b8740f271c687813a0b039a7d1629f622b8c" }
+builddeed = { git = "https://github.com/13rac1/builddeed-sdk", rev = "6e72f7bec2ed7483942d4a7c546e5180830268f4" }
 # Slint with the winit backend and the software renderer: no Qt, no GTK and
 # no system GPU library.
 slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software", "accessibility", "raw-window-handle-06", "unstable-winit-030"] }
@@ -30,7 +30,7 @@ fontique = { version = "0.11", default-features = false, features = ["fontconfig
 slint-build = "=1.18.1"
 
 [dev-dependencies]
-builddeed = { git = "https://github.com/13rac1/builddeed-sdk", rev = "b137b8740f271c687813a0b039a7d1629f622b8c", features = ["test-support"] }
+builddeed = { git = "https://github.com/13rac1/builddeed-sdk", rev = "6e72f7bec2ed7483942d4a7c546e5180830268f4", features = ["test-support"] }
 
 [profile.release]
 codegen-units = 1

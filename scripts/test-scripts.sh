@@ -62,14 +62,14 @@ grep -q '"remove_device"' "$ROOT/site/src/pages/licenses.js" || fail "site does 
 # the RPC host from the SDK's testnet default).
 # (the app gets the contract from the SDK's OFFICIAL_TESTNET_CONTRACT).
 grep -q 'OFFICIAL_TESTNET_CONTRACT' "$ROOT/app/src/main.rs" || fail "app does not use OFFICIAL_TESTNET_CONTRACT"
-for f in site/src/near.js scripts/verify.sh scripts/record-build.sh; do
+for f in site/src/catalog.js scripts/verify.sh scripts/record-build.sh; do
   grep -q 'licenses.builddeed.testnet' "$ROOT/$f" || fail "$f does not name licenses.builddeed.testnet"
 done
 grep -q 'PRODUCT_KEY: &str = "checksum"' "$ROOT/app/src/main.rs" || fail "app product key is not checksum"
 for f in scripts/verify.sh scripts/record-build.sh; do
   grep -q 'PRODUCT:-checksum' "$ROOT/$f" || fail "$f does not default to the product checksum"
 done
-for f in site/src/near.js scripts/verify.sh scripts/record-build.sh; do
+for f in site/src/catalog.js scripts/verify.sh scripts/record-build.sh; do
   grep -q 'rpc.testnet.fastnear.com' "$ROOT/$f" || fail "$f does not use rpc.testnet.fastnear.com"
 done
 
