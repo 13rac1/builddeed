@@ -25,6 +25,7 @@ on the market; each sale pays the developers and contributors.
 | Amounts | yoctoNEAR as decimal strings: 1 NEAR = `"1000000000000000000000000"` |
 | Token ids | `<product>:<n>`, for example `checksum:1` |
 | Products | `checksum` (BuildDeed Checksum) and `doom` (Room4Doom); `get_products` lists all |
+| Website | <https://builddeed.dev/>; each product has a page at `https://builddeed.dev/p/<key>/` |
 | Protocol spec | <https://github.com/13rac1/builddeed-sdk/blob/main/spec/README.md> |
 
 The RPC is shared with other people. Send one request at a time, and back off
@@ -223,7 +224,7 @@ attach, so only a full-access key (the owner's wallet) can call them.
 
 ## Steps for the owner
 
-1. **Deposit a budget.** On [My licenses](licenses.html#agent-budget),
+1. **Deposit a budget.** On [My licenses](https://builddeed.dev/licenses/#budget),
    connect your wallet, check the products that the agent can buy (1 to 16),
    set the highest price of one license, and deposit NEAR. This calls
    `deposit_budget` with `{"max_price": "<yocto>", "products": ["checksum"]}`

@@ -1,9 +1,9 @@
 import { h, mountChrome, busy, showOk, showError } from "../ui.js";
-import { view, call, onAccount, signIn, formatNear, formatDate, parseNear, pageLink, loadProducts, tokenNumber, contractError, CONTRACT } from "../near.js";
+import { view, call, onAccount, signIn, formatNear, formatDate, parseNear, productPath, marketLink, loadProducts, tokenNumber, contractError, CONTRACT } from "../near.js";
 
 mountChrome();
 const main = document.getElementById("main");
-const head = () => h("div", { class: "page-head" }, h("span", { class: "eyebrow" }, "All products"), h("h1", {}, "My licenses"));
+const head = () => h("div", { class: "page-head" }, h("h1", {}, "My licenses"));
 
 async function render(acct) {
   if (!acct) {
@@ -21,13 +21,54 @@ async function render(acct) {
   ]);
   const byKey = Object.fromEntries(products.map((p) => [p.key, p]));
   const known = list.filter((l) => byKey[l.product]);
+  const licensesPanel = h(
+    "div",
+    { id: "panel-licenses", role: "tabpanel", "aria-labelledby": "tab-licenses" },
+    known.length
+      ? h("div", { class: "license-grid" }, known.map((l) => card(l, byKey[l.product])))
+      : h("div", { class: "card empty" }, h("p", {}, "This account has no license."), h("p", {}, h("a", { href: "/" }, "Buy one in the store"), " or look at ", h("a", { href: marketLink() }, "used licenses"), "."))
+  );
+  const budgetPanel = h("div", { id: "panel-budget", role: "tabpanel", "aria-labelledby": "tab-budget" }, budgetSection(acct, budget, products));
   main.replaceChildren(
     head(),
-    known.length
-      ? h("div", {}, known.map((l) => card(l, byKey[l.product])))
-      : h("p", {}, "This account has no license. ", h("a", { href: pageLink("buy.html") }, "Buy one"), " or look at the ", h("a", { href: pageLink("market.html") }, "market"), "."),
-    budgetSection(acct, budget, products)
+    tabs([
+      ["licenses", `Licenses (${known.length})`, licensesPanel],
+      ["budget", budget ? `Agent budget (${formatNear(budget.balance)} NEAR)` : "Agent budget", budgetPanel],
+    ]),
+    licensesPanel,
+    budgetPanel
   );
+}
+
+/** The tab of the page: #budget (or the old #agent-budget) opens the budget. */
+let tab = /^#(agent-)?budget$/.test(location.hash) ? "budget" : "licenses";
+
+/** A tab list; each entry is [id, label, panel]. Only the panel of the
+ * current tab shows. */
+function tabs(entries) {
+  const buttons = entries.map(([id, label]) =>
+    h("button", { type: "button", role: "tab", id: `tab-${id}`, class: "tab", "aria-controls": `panel-${id}` }, label)
+  );
+  const select = (id) => {
+    tab = id;
+    entries.forEach(([eid, , panel], i) => {
+      panel.hidden = eid !== id;
+      buttons[i].setAttribute("aria-selected", eid === id ? "true" : "false");
+      buttons[i].tabIndex = eid === id ? 0 : -1;
+    });
+    history.replaceState(null, "", id === "budget" ? "#budget" : location.pathname + location.search);
+  };
+  buttons.forEach((b, i) => b.addEventListener("click", () => select(entries[i][0])));
+  const list = h("div", { class: "tabs", role: "tablist", "aria-label": "My licenses" }, buttons);
+  list.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    const i = entries.findIndex(([id]) => id === tab);
+    const next = (i + (e.key === "ArrowRight" ? 1 : entries.length - 1)) % entries.length;
+    select(entries[next][0]);
+    buttons[next].focus();
+  });
+  select(tab);
+  return list;
 }
 
 // ----- Agent budget -----
@@ -144,12 +185,12 @@ function budgetSection(acct, budget, products) {
   return h(
     "section",
     { id: "agent-budget" },
-    h("h2", { style: "margin-top:40px" }, "Agent budget"),
+    h("h2", { class: "sr-only" }, "Agent budget"),
     h(
       "p",
       { class: "muted" },
       "An AI agent or a script can buy licenses and register computers for you with a function-call key on your account. Such a key cannot attach NEAR, so it pays from this budget. It cannot sell or list a license, withdraw, or change the limits: only your wallet can. ",
-      h("a", { href: "agents.md" }, "Guide for agents")
+      h("a", { href: "/agents.md" }, "Guide for agents")
     ),
     h(
       "div",
@@ -274,7 +315,7 @@ function card(l, p) {
       height: "128",
       loading: "lazy",
     }),
-    h("span", { class: "eyebrow" }, p.name),
+    h("a", { class: "eyebrow", href: productPath(p.key) }, p.name),
     h("h3", {}, `License #${tokenNumber(l.token_id)}`),
     h(
       "dl",

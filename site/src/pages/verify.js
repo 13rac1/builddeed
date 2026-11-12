@@ -1,5 +1,5 @@
-import { h, mountChrome, showError } from "../ui.js";
-import { viewOf, formatDate, loadProduct } from "../near.js";
+import { h, mountChrome, showError, chips } from "../ui.js";
+import { viewOf, formatDate, loadProducts, queryProduct, DEFAULT_PRODUCT } from "../near.js";
 
 mountChrome();
 const main = document.getElementById("main");
@@ -72,8 +72,15 @@ drop.addEventListener("drop", (e) => {
 });
 input.addEventListener("change", () => pick(input.files));
 
-function render() {
+function render(products) {
+  const pick = chips("Product", products.map((x) => [x.key, x.name]), product.key, (key) => {
+    const url = new URL(location.href);
+    url.searchParams.set("product", key);
+    history.replaceState(null, "", url);
+    show(products, key).catch((e) => table.replaceChildren(h("p", { class: "warn-text" }, `Cannot read the builds: ${e.message}`)));
+  });
   main.replaceChildren(
+    pick,
     h("div", { class: "page-head" }, h("span", { class: "eyebrow" }, product.name), h("h1", {}, "Verify a download")),
     h(
       "p",
@@ -99,36 +106,43 @@ function render() {
 }
 
 let product;
-loadProduct()
-  .then((p) => {
-    product = p;
-    render();
-    return viewOf(p, "get_builds", { product: p.key, from_index: 0, limit: 100 });
-  })
-  .then((builds) => {
-    const rows = builds.flatMap((b) =>
-      b.artifacts.map((a) =>
-        h(
-          "tr",
-          {},
-          h("td", {}, b.version),
-          h("td", {}, a.platform),
-          h("td", {}, fileLink(a)),
-          h("td", { class: "mono" }, a.sha256),
-          h("td", {}, a.attestation_url ? h("a", { href: a.attestation_url }, "link") : "")
-        )
+
+/** Shows the page for one product: the drop zone and its recorded files. */
+function show(products, key) {
+  product = products.find((x) => x.key === key) || products.find((x) => x.key === DEFAULT_PRODUCT) || products[0];
+  result.replaceChildren();
+  table.replaceChildren(h("p", { class: "muted" }, "Loading the official builds..."));
+  render(products);
+  return viewOf(product, "get_builds", { product: product.key, from_index: 0, limit: 100 }).then(showBuilds);
+}
+
+function showBuilds(builds) {
+  const rows = builds.flatMap((b) =>
+    b.artifacts.map((a) =>
+      h(
+        "tr",
+        {},
+        h("td", {}, b.version),
+        h("td", {}, a.platform),
+        h("td", {}, fileLink(a)),
+        h("td", { class: "mono" }, a.sha256),
+        h("td", {}, a.attestation_url ? h("a", { href: a.attestation_url }, "link") : "")
       )
-    );
-    table.replaceChildren(
-      rows.length
-        ? h(
-            "div",
-            { class: "table-wrap" },
-            h("table", {}, h("tr", {}, h("th", {}, "Version"), h("th", {}, "Platform"), h("th", {}, "File"), h("th", {}, "SHA-256"), h("th", {}, "Attestation")), rows)
-          )
-        : h("p", { class: "muted" }, "No build is recorded yet.")
-    );
-  })
+    )
+  );
+  table.replaceChildren(
+    rows.length
+      ? h(
+          "div",
+          { class: "table-wrap" },
+          h("table", {}, h("tr", {}, h("th", {}, "Version"), h("th", {}, "Platform"), h("th", {}, "File"), h("th", {}, "SHA-256"), h("th", {}, "Attestation")), rows)
+        )
+      : h("p", { class: "muted" }, "No build is recorded yet.")
+  );
+}
+
+loadProducts()
+  .then((products) => show(products, queryProduct()))
   .catch((e) => {
     const msg = h("p", { class: "warn-text" }, `Cannot read the contract: ${e.message}`);
     if (product) table.replaceChildren(msg);

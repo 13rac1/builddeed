@@ -2,66 +2,52 @@
 // wallet calls through NEAR Connect.
 import { NearConnector } from "@hot-labs/near-connect";
 
-export const NETWORK = "testnet";
-/** The official BuildDeed collection. Each license of each product is a
- * token of this one contract. */
-export const CONTRACT = "licenses.builddeed.testnet";
-/** The product of a page without ?product=. */
-export const DEFAULT_PRODUCT = "checksum";
-/** Old product keys of links that are still in use. */
-const ALIASES = { demo: "checksum" };
+import { CONTRACT, NETWORK, RPC, DEFAULT_PRODUCT, withExtras, formatNear, productPath } from "./catalog.js";
 
-/** Display data that the contract does not keep, by product key. */
-const EXTRAS = {
-  checksum: {
-    shot: "img/checksum-nag.webp",
-    alt: "BuildDeed Checksum showing its UNREGISTERED COPY screen",
-    tags: ["Rust", "Slint", "Linux · Windows · macOS"],
-    text: "A file checksum tool. Drop a file to see its SHA-256 and its official build record. Registered: the folder check, which reports what changed since the last check.",
-    pixel: false,
-  },
-  doom: {
-    shot: "img/doom-play.webp",
-    alt: "Room4Doom with Freedoom: the shotgun, health 85 and a defeated monster in E1M1",
-    tags: ["Rust", "GPL-2.0-or-later", "Freedoom inside"],
-    text: "It runs Doom. A Doom engine in Rust with monsters, weapons and sound. Unregistered: E1M1. Press R in the game to register this computer; a license unlocks every episode and map.",
-    pixel: true,
-  },
-};
+export { CONTRACT, NETWORK, RPC, DEFAULT_PRODUCT, formatNear, productPath };
+export { SITE, EXTRAS, nftImage, termLines, isProductKey } from "./catalog.js";
 
 /** The repository of BuildDeed itself. */
 export const BUILDDEED_REPO = "https://github.com/13rac1/builddeed";
+/** The repository of the BuildDeed SDK (Rust and Go). */
+export const SDK_REPO = "https://github.com/13rac1/builddeed-sdk";
 /** The repository of Room4Doom, for the footer. */
 export const ROOM4DOOM_REPO = "https://github.com/ai-13rac1/room4doom";
-export const RPC = "https://rpc.testnet.fastnear.com";
 export const EXPLORER = "https://testnet.nearblocks.io";
 export const FAUCET = "https://near-faucet.io/";
 const GAS = "100000000000000"; // 100 Tgas
 
 const YOCTO = 10n ** 24n;
 
-/** A product key from a link, with the old keys changed to the new ones. */
+/** The product key of a link, or null. */
 export function productKey(key) {
-  if (!key) return null;
-  return ALIASES[key] || key;
+  return key || null;
 }
 
-/** The product key of this page: ?product=doom, or #product=doom (the
- * register page), or the default product. */
-export const PRODUCT_KEY =
-  productKey(new URLSearchParams(location.search).get("product")) ||
-  productKey(new URLSearchParams(location.hash.slice(1)).get("product")) ||
-  DEFAULT_PRODUCT;
-
-/** A link to another page of this site for a product (a key or a product). */
-export function pageLink(page, product = PRODUCT_KEY) {
-  const key = typeof product === "string" ? product : product.key;
-  return key === DEFAULT_PRODUCT ? page : `${page}?product=${encodeURIComponent(key)}`;
+/** The product key in ?product=, or null. */
+export function queryProduct() {
+  return productKey(new URLSearchParams(location.search).get("product"));
 }
 
-/** A product view of the contract with the fields that the site adds. */
-function withExtras(view, contract) {
-  return { ...view, contract, repo: view.url || null, ...(EXTRAS[view.key] || {}) };
+/** The product key in #product= (the register page), or the default. */
+export function hashProduct() {
+  return productKey(new URLSearchParams(location.hash.slice(1)).get("product")) || DEFAULT_PRODUCT;
+}
+
+/** The product key in a /p/<key>/ path, or null. */
+export function pathProduct(pathname = location.pathname) {
+  const m = pathname.match(/^\/p\/([^/]+)\/?(?:index\.html)?$/);
+  return m ? productKey(decodeURIComponent(m[1])) : null;
+}
+
+/** The used license market, for one product or for all. */
+export function marketLink(key) {
+  return key ? `/market/?product=${encodeURIComponent(key)}` : "/market/";
+}
+
+/** The verify page of a product. */
+export function verifyLink(key) {
+  return `/verify/?product=${encodeURIComponent(key)}`;
 }
 
 let productsPromise = null;
@@ -80,9 +66,9 @@ export function loadProducts() {
   return productsPromise;
 }
 
-/** The product with this key (default: the product of this page). It
- * throws when the collection has no such product. */
-export async function loadProduct(key = PRODUCT_KEY) {
+/** The product with this key. It throws when the collection has no such
+ * product. */
+export async function loadProduct(key) {
   const p = (await loadProducts()).find((x) => x.key === key);
   if (!p) throw new Error(`No product has the key "${key}"`);
   return p;
@@ -196,15 +182,6 @@ export function contractError(e) {
   const msg = e?.message || String(e);
   const m = msg.match(/Smart contract panicked: ([^"\\}]+)/);
   return m ? m[1].trim() : msg;
-}
-
-/** yoctoNEAR string -> "5" or "2.61" (at most 4 decimals). */
-export function formatNear(yocto) {
-  const y = BigInt(yocto);
-  const whole = y / YOCTO;
-  const frac = ((y % YOCTO) * 10000n) / YOCTO;
-  if (frac === 0n) return whole.toString();
-  return `${whole}.${frac.toString().padStart(4, "0").replace(/0+$/, "")}`;
 }
 
 /** "2.5" -> yoctoNEAR string. */

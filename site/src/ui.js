@@ -7,11 +7,8 @@ import {
   signIn,
   signOut,
   BUILDDEED_REPO,
-  ROOM4DOOM_REPO,
+  SDK_REPO,
   CONTRACT,
-  PRODUCT_KEY,
-  loadProducts,
-  pageLink,
   accountLink,
   contractError,
 } from "./near.js";
@@ -32,14 +29,27 @@ export function h(tag, attrs = {}, ...children) {
   return el;
 }
 
-const NAV = [
-  ["index.html", "Home"],
-  ["buy.html", "Buy"],
-  ["licenses.html", "My licenses"],
-  ["market.html", "Market"],
-  ["verify.html", "Verify"],
-  ["developers.html", "Developers"],
+/** The store: for people who buy and use licenses. */
+const STORE_NAV = [
+  ["/", "Store"],
+  ["/market/", "Used licenses"],
+  ["/licenses/", "My licenses"],
+  ["/verify/", "Verify a download"],
 ];
+
+/** The developer area: for people who sell their software. */
+const DEV_NAV = [
+  ["/developers/", "Overview"],
+  ["/developers/add/", "Add your product"],
+  ["/developers/docs/", "Docs"],
+];
+
+/** The nav entry of a path: a product page belongs to the store front. */
+function current(path) {
+  const p = path.replace(/index\.html$/, "");
+  if (p === "/" || p.startsWith("/p/")) return "/";
+  return p;
+}
 
 /** An SVG or other fixed markup from this file (never chain data). */
 export function markup(html) {
@@ -57,33 +67,29 @@ export const LOGO = `<svg viewBox="0 0 32 32" aria-hidden="true">
   <path d="m18.7 23.6 2 2 3.6-3.9" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>`;
 
-export function mountChrome() {
-  const here = location.pathname.split("/").pop() || "index.html";
+/** Adds the header and the footer. `area` is "store" or "developers". */
+export function mountChrome(area = "store") {
+  const dev = area === "developers";
+  const here = current(location.pathname);
   const wallet = h("div", { class: "wallet" });
-  // The products come from the contract; the links appear when they load.
-  const switcher = h("div", { class: "products", role: "group", "aria-label": "Product" });
-  const footerProducts = h("ul", {});
+  const nav = (dev ? DEV_NAV : STORE_NAV).map(([href, label]) =>
+    h("a", { href, "aria-current": href === here ? "page" : null }, label)
+  );
   const header = h(
     "header",
-    { class: "site-header" },
+    { class: dev ? "site-header dev" : "site-header" },
     h(
       "div",
       { class: "bar" },
       h(
         "a",
-        { class: "brand", href: pageLink("index.html") },
+        { class: "brand", href: dev ? "/developers/" : "/" },
         markup(LOGO),
         h("span", {}, "BuildDeed"),
+        dev ? h("span", { class: "area" }, "for developers") : null,
         h("span", { class: "testnet", title: "This demo runs on NEAR testnet" }, "testnet")
       ),
-      h(
-        "nav",
-        { "aria-label": "Site" },
-        NAV.map(([href, label]) =>
-          h("a", { href: pageLink(href), "aria-current": href === here ? "page" : null }, label)
-        )
-      ),
-      switcher,
+      h("nav", { "aria-label": dev ? "Developers" : "Store" }, nav, dev ? h("a", { class: "back", href: "/" }, "Back to the store") : null),
       wallet
     )
   );
@@ -100,32 +106,34 @@ export function mountChrome() {
         h(
           "div",
           {},
-          h("a", { class: "brand", href: "index.html" }, markup(LOGO), h("span", {}, "BuildDeed")),
+          h("a", { class: "brand", href: "/" }, markup(LOGO), h("span", {}, "BuildDeed")),
+          h("p", {}, "Buy software. Own the license. Resell it. Each sale pays the people who made the program.")
+        ),
+        h(
+          "div",
+          {},
+          h("h4", {}, "Store"),
           h(
-            "p",
+            "ul",
             {},
-            "Software licenses as NFTs on NEAR, in one collection for all products. The license gives you the verified official build; each sale pays the people who made it."
+            link("/", "Store"),
+            link("/market/", "Used licenses"),
+            link("/licenses/", "My licenses"),
+            link("/verify/", "Verify a download"),
+            link("/#faq", "Questions")
           )
         ),
         h(
           "div",
           {},
-          h("h4", {}, "Products"),
-          footerProducts
-        ),
-        h(
-          "div",
-          {},
-          h("h4", {}, "Use"),
+          h("h4", {}, "Sell"),
           h(
             "ul",
             {},
-            link(pageLink("licenses.html"), "My licenses"),
-            link(pageLink("market.html"), "Market"),
-            link(pageLink("verify.html"), "Verify a download"),
-            link("developers.html", "For developers"),
-            link("agents.md", "For agents"),
-            link("index.html#faq", "Questions")
+            link("/developers/", "For developers"),
+            link("/developers/add/", "Add your product"),
+            link("/developers/docs/", "Docs"),
+            link("/agents.md", "For agents")
           )
         ),
         h(
@@ -136,8 +144,8 @@ export function mountChrome() {
             "ul",
             {},
             link(BUILDDEED_REPO, "BuildDeed on GitHub"),
-            link(ROOM4DOOM_REPO, "Room4Doom on GitHub"),
-            link(accountLink(CONTRACT), `License collection ${CONTRACT}`),
+            link(SDK_REPO, "BuildDeed SDK"),
+            link(accountLink(CONTRACT), `Contract ${CONTRACT}`),
             link("https://nearhackathon.com/", "NEAR HACKATHON")
           )
         )
@@ -146,7 +154,7 @@ export function mountChrome() {
         "p",
         { class: "fine" },
         "Testnet demo built at NEAR HACKATHON 2026 by Hardened Minds. Testnet NEAR has no value. ",
-        "BuildDeed is under the Business Source License 1.1; Room4Doom is under the GPL-2.0-or-later."
+        "BuildDeed is under the Business Source License 1.1. Each product has its own license."
       )
     )
   );
@@ -164,21 +172,6 @@ export function mountChrome() {
     );
   });
   getConnector().catch((e) => console.error("wallet list", e));
-
-  // My licenses and the market show all products, and the program sets the
-  // product of the register page: these pages have no switcher.
-  const noSwitcher = ["licenses.html", "market.html", "register.html"].includes(here);
-  loadProducts()
-    .then((products) => {
-      footerProducts.replaceChildren(...products.map((p) => link(pageLink("buy.html", p), p.name)));
-      if (noSwitcher) return;
-      switcher.replaceChildren(
-        ...products.map((p) =>
-          h("a", { href: pageLink(here, p), "aria-current": p.key === PRODUCT_KEY ? "true" : null }, p.name)
-        )
-      );
-    })
-    .catch(() => {});
 }
 
 export function showError(e) {
@@ -207,4 +200,16 @@ export async function busy(button, f) {
     button.disabled = false;
     button.textContent = label;
   }
+}
+
+/** Filter chips: one button for each option, `[value, label]`. The pressed
+ * chip is the current value; a click calls `onSelect(value)`. */
+export function chips(label, options, value, onSelect) {
+  return h(
+    "div",
+    { class: "chips", role: "group", "aria-label": label },
+    options.map(([v, text]) =>
+      h("button", { type: "button", class: "chip", "aria-pressed": v === value ? "true" : "false", "data-value": v, onclick: () => onSelect(v) }, text)
+    )
+  );
 }

@@ -1,10 +1,15 @@
-# Builds the website in site/ and publishes it with GitHub Pages.
+# Builds the website in site/ and publishes it with GitHub Pages at
+# https://builddeed.dev (the custom domain is set in the repository settings).
 name: Pages
 
 on:
   push:
     branches: [main]
     paths: ["site/**", ".github/workflows/pages.yml"]
+  # Each day: the build reads the products from the chain, so a product
+  # added since the last build gets its static page at /p/<key>/.
+  schedule:
+    - cron: "17 4 * * *"
   workflow_dispatch:
 
 permissions:

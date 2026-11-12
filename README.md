@@ -6,10 +6,10 @@ BuildDeed sells software licenses as NFTs on NEAR, to pay open source
 developers and contributors. A license gives its owner the verified official
 build of a program. Anyone can read the code and build it.
 
-- Website (testnet demo): https://13rac1.github.io/builddeed/
+- Website (testnet demo): https://builddeed.dev/ (developers: https://builddeed.dev/developers/)
 - License contract: [`licenses.builddeed.testnet`](https://testnet.nearblocks.io/address/licenses.builddeed.testnet): one contract and one NFT collection for every product
 - Downloads: [GitHub releases](https://github.com/13rac1/builddeed/releases/latest)
-- For AI agents: [agents.md](https://13rac1.github.io/builddeed/agents.md) (buy, register and download with the `builddeed` CLI)
+- For AI agents: [agents.md](https://builddeed.dev/agents.md) (buy, register and download with the `builddeed` CLI)
 - Built at NEAR HACKATHON 2026, track `nfts` ("NFTs That Do Something").
 
 ## The problem
