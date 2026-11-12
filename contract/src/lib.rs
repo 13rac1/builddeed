@@ -63,7 +63,7 @@ const MAX_VERSIONS: usize = 1_000;
 const MAX_BUDGET_PRODUCTS: usize = 16;
 /// Where wallets find the image of a license: `<NFT_BASE_URI>/<product>.svg`.
 /// The website serves one image for each product.
-pub const NFT_BASE_URI: &str = "https://13rac1.github.io/builddeed/nft";
+pub const NFT_BASE_URI: &str = "https://builddeed.dev/nft";
 
 // The order of the variants is part of the stored state. Do not change it.
 #[derive(BorshStorageKey)]
