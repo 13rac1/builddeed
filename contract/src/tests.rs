@@ -2243,12 +2243,15 @@ fn a_budget_serves_only_its_owner() {
 fn a_license_has_the_image_of_its_product() {
     let c = with_license();
     let t = c.nft_token(T1.into()).unwrap();
-    assert_eq!(t.metadata.unwrap().media.as_deref(), Some("checksum.svg"));
+    assert_eq!(
+        t.metadata.unwrap().media.as_deref(),
+        Some("https://builddeed.dev/nft/checksum.png")
+    );
     assert_eq!(c.nft_metadata().base_uri.as_deref(), Some(NFT_BASE_URI));
     let listed = c.nft_tokens(None, None);
     assert_eq!(
         listed[0].metadata.as_ref().unwrap().media.as_deref(),
-        Some("checksum.svg")
+        Some("https://builddeed.dev/nft/checksum.png")
     );
 }
 
@@ -2257,7 +2260,10 @@ fn a_license_without_an_image_gets_one_when_read() {
     let mut t = with_license().nft_token(T1.into()).unwrap();
     t.metadata.as_mut().unwrap().media = None;
     let t = with_media(t);
-    assert_eq!(t.metadata.unwrap().media.as_deref(), Some("checksum.svg"));
+    assert_eq!(
+        t.metadata.unwrap().media.as_deref(),
+        Some("https://builddeed.dev/nft/checksum.png")
+    );
 }
 
 #[test]
@@ -2299,4 +2305,37 @@ fn set_details_refuses_a_url_that_is_not_https() {
     let e =
         panic_text(|| c.set_details(P.into(), "X".into(), String::new(), Some("http://x".into())));
     assert!(e.contains("https"), "{e}");
+}
+
+#[test]
+fn a_sale_logs_the_nep171_mint_event() {
+    let _ = with_license();
+    let logs = near_sdk::test_utils::get_logs();
+    let mint = logs
+        .iter()
+        .find(|l| l.contains("\"standard\":\"nep171\"") && l.contains("\"event\":\"nft_mint\""))
+        .expect("a nep171 nft_mint event");
+    assert!(mint.contains("\"owner_id\":\"alice.near\""), "{mint}");
+    assert!(mint.contains("\"checksum:1\""), "{mint}");
+}
+
+#[test]
+fn emit_mint_events_logs_the_owner_of_each_token() {
+    let mut c = with_license();
+    call("demo.near", yocto(0), 20_000);
+    c.emit_mint_events(vec![T1.into()]);
+    let logs = near_sdk::test_utils::get_logs();
+    assert_eq!(logs.len(), 1, "{logs:?}");
+    assert!(
+        logs[0].contains("nft_mint") && logs[0].contains("alice.near"),
+        "{logs:?}"
+    );
+}
+
+#[test]
+fn emit_mint_events_is_private() {
+    let mut c = with_license();
+    call("eve.near", yocto(0), 20_000);
+    let e = panic_text(|| c.emit_mint_events(vec![T1.into()]));
+    assert!(e.contains("private"), "{e}");
 }

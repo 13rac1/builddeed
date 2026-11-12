@@ -30,6 +30,7 @@
 
 use near_contract_standards::non_fungible_token::core::NonFungibleTokenCore;
 use near_contract_standards::non_fungible_token::enumeration::NonFungibleTokenEnumeration;
+use near_contract_standards::non_fungible_token::events::NftMint;
 use near_contract_standards::non_fungible_token::metadata::{
     NFTContractMetadata, NonFungibleTokenMetadataProvider, TokenMetadata, NFT_METADATA_SPEC,
 };
@@ -546,6 +547,14 @@ impl Contract {
             Some(metadata),
             None,
         );
+        // internal_mint_with_refund does not log the NEP-171 mint event, and
+        // wallets find NFTs through indexers that read these events.
+        NftMint {
+            owner_id: buyer,
+            token_ids: &[token_id.as_str()],
+            memo: None,
+        }
+        .emit();
         let storage_cost = storage_cost_since(storage_before);
         require!(
             storage_cost < price,
@@ -1006,6 +1015,30 @@ impl Contract {
             })
     }
 
+    /// Logs the NEP-171 mint event for licenses that were minted before the
+    /// contract logged it, so that indexers and wallets find them. It only
+    /// writes logs; it changes no state. Only the contract account can call
+    /// it.
+    pub fn emit_mint_events(&mut self, token_ids: Vec<TokenId>) {
+        require!(
+            env::predecessor_account_id() == env::current_account_id(),
+            "Method emit_mint_events is private"
+        );
+        require!(
+            token_ids.len() <= MAX_PAGE as usize,
+            "Give at most 100 tokens"
+        );
+        for token_id in &token_ids {
+            let owner = self.owner_of(token_id);
+            NftMint {
+                owner_id: &owner,
+                token_ids: &[token_id.as_str()],
+                memo: None,
+            }
+            .emit();
+        }
+    }
+
     // ----- Internal -----
 
     fn budget_of(&self, owner: &AccountId) -> Budget {
@@ -1312,18 +1345,18 @@ impl NonFungibleTokenMetadataProvider for Contract {
     }
 }
 
-/// The image of a license, relative to [`NFT_BASE_URI`]: one per product.
+/// The image of a license: one PNG per product, under [`NFT_BASE_URI`].
 fn media_of(token_id: &str) -> String {
-    format!("{}.svg", product_of(token_id))
+    format!("{NFT_BASE_URI}/{}.png", product_of(token_id))
 }
 
-/// Licenses minted before images were added have no `media`: give them the
-/// product's image when a wallet reads them.
+/// Every license shows its product's image as a full URL: some wallets do
+/// not join `base_uri` and a relative `media`, and some do not show SVG.
+/// Licenses minted with no image, or with a relative SVG name, get the
+/// current one when a wallet reads them.
 fn with_media(mut t: Token) -> Token {
     if let Some(m) = t.metadata.as_mut() {
-        if m.media.is_none() {
-            m.media = Some(media_of(&t.token_id));
-        }
+        m.media = Some(media_of(&t.token_id));
     }
     t
 }
