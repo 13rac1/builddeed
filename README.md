@@ -1,14 +1,19 @@
 # BuildDeed
 
-Shareware is back, but you can resell your license.
+Buy software. Own the license. Resell it.
 
 BuildDeed sells software licenses as NFTs on NEAR, to pay open source
 developers and contributors. A license gives its owner the verified official
 build of a program. Anyone can read the code and build it.
 
-- Website (testnet demo): https://builddeed.dev/ (developers: https://builddeed.dev/developers/)
+It runs Doom: the store sells two programs that use it today,
+[Room4Doom](https://builddeed.dev/p/doom/) (a Doom engine with Freedoom) and
+[BuildDeed Checksum](https://builddeed.dev/p/checksum/) (a desktop tool).
+
+- Store (NEAR testnet): https://builddeed.dev/ (developers: https://builddeed.dev/developers/)
 - License contract: [`licenses.builddeed.testnet`](https://testnet.nearblocks.io/address/licenses.builddeed.testnet): one contract and one NFT collection for every product
-- Downloads: [GitHub releases](https://github.com/13rac1/builddeed/releases/latest)
+- Programs: BuildDeed Checksum in this repository ([releases](https://github.com/13rac1/builddeed/releases/latest)), Room4Doom at [ai-13rac1/room4doom](https://github.com/ai-13rac1/room4doom) ([releases](https://github.com/ai-13rac1/room4doom/releases/latest))
+- SDK for developers (Rust and Go): [13rac1/builddeed-sdk](https://github.com/13rac1/builddeed-sdk)
 - For AI agents: [agents.md](https://builddeed.dev/agents.md) (buy, register and download with the `builddeed` CLI)
 - Built at NEAR HACKATHON 2026, track `nfts` ("NFTs That Do Something").
 
@@ -53,7 +58,25 @@ free, then register to remove the nag screen and get the full version.
 
 ## Try it (judges)
 
-You need a NEAR testnet account with about 10 testnet NEAR. Testnet NEAR is
+Three ways to try it, from fastest to fullest:
+
+- **Room4Doom (5 minutes, Linux or macOS).** Download the archive from the
+  [Room4Doom releases](https://github.com/ai-13rac1/room4doom/releases/latest),
+  extract it and run `room4doom`. You see the Freedoom title screen with the
+  license box: "Unregistered shareware copy". E1M1 plays (left click fires).
+  Start a new game in episode 2: you see "Register this computer to play
+  this map." Buy a license on https://builddeed.dev/p/doom/ (1 testnet
+  NEAR), press R in the game, and register the computer on the page that
+  opens: within a few seconds the box shows "Registered to <your account>",
+  and every map is open.
+- **An AI agent buys (no browser).** Follow [agents.md](https://builddeed.dev/agents.md):
+  the owner deposits a budget with a highest price, gives the agent a
+  function-call key, and the agent runs `builddeed buy`, `register` and
+  `download`. You see the license, the seat and a checked download as JSON.
+- **BuildDeed Checksum (the full flow, below).** Buy, register, use the
+  feature, resell with a second account, and verify downloads.
+
+For all of them you need a NEAR testnet account with some testnet NEAR. Testnet NEAR is
 free: create an account in a wallet that supports testnet (for example
 [MyNearWallet testnet](https://testnet.mynearwallet.com/) or Meteor), and get
 NEAR from [near-faucet.io](https://near-faucet.io/).
@@ -68,7 +91,7 @@ NEAR from [near-faucet.io](https://near-faucet.io/).
      shows "Official build <version>", the commit and the attestation link.
 3. Drop a folder on the window, or click "Check a folder…".
    - You see: "The folder check needs a license."
-4. Click "Register", then "Buy a license". On the website, connect your
+4. Click "Register", then "Buy a license". On the product page, connect your
    wallet and click "Buy for 0.1 NEAR".
    - You see: one wallet approval, then "License bought". On "My licenses":
      license #N, updates until one year from now.
@@ -80,7 +103,7 @@ NEAR from [near-faucet.io](https://near-faucet.io/).
 6. Drop the same folder twice, with a change between the two.
    - You see: a report of the changed, added and removed files.
 7. On the website, go to "My licenses" and list the license for 0.2 NEAR. With
-   a second testnet account, buy it on "Market".
+   a second testnet account, buy it on "Used licenses".
    - You see: the second account owns the license. The first account got
      0.174 NEAR; the developer, the contributor and the fee account got the
      royalty and the fee. The resale cleared the seats: restart the app of
@@ -96,11 +119,11 @@ With Podman (about 6 GB of disk for the build cache):
 
 ```sh
 git clone https://github.com/13rac1/builddeed && cd builddeed
-scripts/verify.sh 0.1.1
+scripts/verify.sh 0.1.4
 ```
 
 You see `SAME` for each Linux and Windows file, compared with the SHA-256 in
-the contract. The script checks that the tag `v0.1.1` points to the commit
+the contract. The script checks that the tag `v0.1.4` points to the commit
 that the contract records, and builds with the scripts of your checkout.
 
 ### The installers are not signed
@@ -121,14 +144,14 @@ The hackathon release has no Apple or Windows code signature.
 
 | Part | NEAR feature |
 | --- | --- |
-| License | NEP-171 NFT with NEP-177 metadata and NEP-181 enumeration. The token metadata holds the update period, and each license shows its product's image (`<product>.svg` under the collection's `base_uri`, served by the website). |
+| License | NEP-171 NFT with NEP-177 metadata and NEP-181 enumeration. Each sale logs the NEP-171 `nft_mint` event, so wallets such as Meteor show the license. The token metadata holds the update period, and each license shows its product's image (`https://builddeed.dev/nft/<product>.png`). |
 | Payment split | The contract pays the payees with transfers in the `buy`, `renew` and `buy_listed` calls. |
 | Resale market and royalty | `list`, `delist` (1 yoctoNEAR, so that only a full-access key can call them), `buy_listed` with the price that the buyer saw. `nft_transfer` is refused. |
-| Products | One contract holds every product. A developer calls `add_product` with the key, name, prices, update period, royalty, payees and seats per license, and pays only for the storage of the record. Token ids are `<product>:<number>`, for example `doom:1`. |
+| Products | One contract holds every product. A developer calls `add_product` with the key, name, prices, update period, royalty, payees and seats per license, and pays only for the storage of the record. A self-service product key is `<name>.<developer account>`, so nobody can take a name in another account. Token ids are `<product>:<number>`, for example `doom:1`. |
 | Computer seats | `add_device` (owner only, storage paid by the owner), `remove_device`, `device_license(product, device_id, version)`. Three seats for each license; a resale clears them. The app reads its seat with a view call, so registration needs no license server and no callback to the app. |
 | Build record | `add_build` (append-only, per product), `find_artifact`, `get_builds`. The storage of a record comes from the product's storage balance (`add_storage`), because a function-call key cannot attach NEAR. |
 | Agent budget | `deposit_budget` (full-access key) with a highest price and a list of products, then a function-call key of the owner can call `buy_from_budget` (with the price it read) and `add_device_from_budget`: an agent buys and registers with no browser and cannot sell. `withdraw_budget` returns the rest. |
-| Download links | Each recorded file has its download URL; `latest_build(product, platform)` gives the newest one. |
+| Download links | Each recorded file has its download URL; `latest_build(product, platform)` gives the file of the last recorded release. |
 | Release key | A function-call access key of the developer account that can call only `add_build` on the license contract. The release workflow holds it, not a full-access key. |
 
 ## Repository
@@ -141,6 +164,13 @@ The hackathon release has no Apple or Windows code signature.
 | `build/` | The Podman build image (Rust 1.99.1, pinned by digest; Debian packages from a fixed snapshot) and the NSIS installer script. |
 | `scripts/` | Build, package, record and verify scripts. All Rust builds run in Podman. |
 | `.github/workflows/` | CI (all checks), Release (check, build, attest, record on chain, publish) and Pages. |
+
+Related repositories:
+
+| Repository | What it is |
+| --- | --- |
+| [ai-13rac1/room4doom](https://github.com/ai-13rac1/room4doom) | Room4Doom with BuildDeed: the license box, the map gate, the reproducible Linux release and its record on chain. A fork of [room4doom](https://github.com/flukejones/room4doom) by Luke Jones. |
+| [13rac1/builddeed-sdk](https://github.com/13rac1/builddeed-sdk) | The client protocol (`spec/`), shared test data (`fixtures/`), the Rust crate with the `builddeed` CLI, and the Go module. |
 
 ### Build and test
 
@@ -173,6 +203,10 @@ The contract on `licenses.builddeed.testnet` has the code hash
 - Products are isolated: a developer can record builds and change terms only
   for their own product. Build records, file hashes and seats are kept per
   product.
+- Anyone can add a product on testnet. Only the publisher (the account that
+  owns the contract account, `builddeed.testnet`) can use short keys such as
+  `doom`; everyone else uses `<name>.<their account>`. A live store needs a
+  review of new products before they are listed.
 - The developer can change the payees and the prices of future sales at any
   time. The renewal price is also the lowest resale price, so a developer who
   raises it can price resales out of the market. The royalty and the seats
@@ -198,7 +232,13 @@ The contract on `licenses.builddeed.testnet` has the code hash
 ## Hackathon disclosures
 
 - Hackathon window: the project started on 2026-11-10. There is no code from
-  before the hackathon.
+  before the hackathon in this repository or in the SDK.
+- Room4Doom is a fork of an existing open source Doom engine,
+  [room4doom](https://github.com/flukejones/room4doom) by Luke Jones (MIT;
+  the fork is distributed under GPL-2.0-or-later, because the engine is a
+  translation of the GPL-2.0 Doom source). The BuildDeed integration in the
+  fork was built during the hackathon. Freedoom is by the Freedoom project
+  (BSD license).
 - AI-written code: an AI coding agent (Claude Code) wrote most of the code,
   the tests and the documents with the team, who directed the design and
   reviewed the work.
