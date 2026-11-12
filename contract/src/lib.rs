@@ -317,9 +317,13 @@ impl Contract {
 
     // ----- Products -----
 
-    /// Adds a product. The caller becomes its developer. `key` is the short
-    /// name in token ids and links: 2 to 32 characters `a-z`, `0-9` and `-`,
-    /// starting with a letter or digit. Attach NEAR for storage: the product
+    /// Adds a product. The caller becomes its developer. `key` is the name in
+    /// token ids and links. The publisher (the account that owns the
+    /// contract account, or the contract account) can use any product key.
+    /// Every other account must use `<name>.<its account>`, for example
+    /// `doom2.alice.testnet`, with a name of 2 to 32 characters `a-z`, `0-9`
+    /// and `-` that starts with a letter or digit, so that nobody can take a
+    /// name in another account's namespace. Attach NEAR for storage: the product
     /// record takes about 0.01 NEAR, and the rest becomes the product's
     /// storage balance for build records (0.5 NEAR is enough for many
     /// releases).
@@ -327,8 +331,20 @@ impl Contract {
     pub fn add_product(&mut self, key: String, terms: ProductTerms) -> ProductView {
         require!(
             is_product_key(&key),
-            "The product key must have 2 to 32 characters a-z, 0-9 and -, and start with a letter or digit"
+            "The product key must have 2 to 97 characters a-z, 0-9, -, _ and ., start with a letter or digit, and have no empty part"
         );
+        let caller = env::predecessor_account_id();
+        if !is_publisher(&caller) {
+            let name = key
+                .strip_suffix(caller.as_str())
+                .and_then(|n| n.strip_suffix('.'))
+                .unwrap_or("");
+            if !is_short_key(name) {
+                env::panic_str(&format!(
+                    "Use a product key of the form <name>.{caller}, with a name of 2 to 32 characters a-z, 0-9 and -"
+                ));
+            }
+        }
         require!(
             !self.products.contains_key(&key),
             "A product with this key exists"
@@ -1369,12 +1385,39 @@ fn check_len(s: &str, max: usize, what: &str) {
     }
 }
 
-/// 2 to 32 characters a-z, 0-9 and -, starting with a letter or digit.
+/// A product key: 2 to 97 characters a-z, 0-9, `-`, `_` and `.`, starting
+/// with a letter or digit, with no empty part between dots. 97 is a short
+/// name (32), a dot and the longest NEAR account id (64).
 pub fn is_product_key(k: &str) -> bool {
+    (2..=97).contains(&k.len())
+        && k.bytes().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_' | b'.')
+        })
+        && k.as_bytes()[0].is_ascii_alphanumeric()
+        && k.split('.').all(|part| !part.is_empty())
+}
+
+/// A short product name: 2 to 32 characters a-z, 0-9 and -, starting with a
+/// letter or digit.
+pub fn is_short_key(k: &str) -> bool {
     (2..=32).contains(&k.len())
         && k.bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
         && !k.starts_with('-')
+}
+
+/// The publisher: the contract account, and the account that owns it (for
+/// `licenses.builddeed.testnet`, `builddeed.testnet`). It can use any
+/// product key; other accounts use keys in their own namespace. A top-level
+/// contract account (`builddeed.testnet`) has no owner here: its parent is
+/// the registrar (`testnet`), which never publishes.
+fn is_publisher(account: &AccountId) -> bool {
+    let contract = env::current_account_id();
+    account == &contract
+        || contract
+            .as_str()
+            .split_once('.')
+            .is_some_and(|(_, owner)| owner.contains('.') && account.as_str() == owner)
 }
 
 fn check_terms(t: &ProductTerms, fee_bps: u16) {

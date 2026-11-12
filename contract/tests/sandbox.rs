@@ -120,8 +120,10 @@ async fn two_products_sale_resale_and_isolation_on_sandbox() -> anyhow::Result<(
     let alice = new_account(&root, "alice").await?;
     let bob = new_account(&root, "bob").await?;
     let carol = new_account(&root, "carol").await?;
-    let contract: Contract = root
-        .create_subaccount("demo")
+    // The contract is a sub-account of dev, so dev is the publisher: it can
+    // use short product keys. Other accounts use keys in their namespace.
+    let contract: Contract = dev
+        .create_subaccount("licenses")
         .initial_balance(NearToken::from_near(10))
         .transact()
         .await?
@@ -168,28 +170,49 @@ async fn two_products_sale_resale_and_isolation_on_sandbox() -> anyhow::Result<(
         checksum_balance > 0 && checksum_balance < NEAR,
         "{checksum_balance}"
     );
+    let doom_terms = json!({
+        "name": "Iron Doom",
+        "description": "",
+        "url": null,
+        "price": (3 * NEAR).to_string(),
+        "renewal_price": NEAR.to_string(),
+        "update_period_days": 30,
+        "royalty_bps": 500,
+        "payees": [{ "account_id": dev2.id(), "bps": 10000 }],
+        "max_devices": 1
+    });
+    // dev2 is not the publisher: a short key is refused.
+    let short = dev2
+        .call(contract.id(), "add_product")
+        .args_json(json!({ "key": "doom", "terms": doom_terms }))
+        .deposit(NearToken::from_near(1))
+        .transact()
+        .await?;
+    let err = format!(
+        "{:?}",
+        short
+            .into_result()
+            .expect_err("a short key of dev2 must fail")
+    );
+    assert!(
+        err.contains(&format!(
+            "Use a product key of the form <name>.{}",
+            dev2.id()
+        )),
+        "{err}"
+    );
+    let doom = format!("doom.{}", dev2.id());
+    let doom1 = format!("{doom}:1");
     dev2.call(contract.id(), "add_product")
-        .args_json(json!({
-            "key": "doom",
-            "terms": {
-                "name": "Iron Doom",
-                "description": "",
-                "url": null,
-                "price": (3 * NEAR).to_string(),
-                "renewal_price": NEAR.to_string(),
-                "update_period_days": 30,
-                "royalty_bps": 500,
-                "payees": [{ "account_id": dev2.id(), "bps": 10000 }],
-                "max_devices": 1
-            }
-        }))
+        .args_json(json!({ "key": doom, "terms": doom_terms }))
         .deposit(NearToken::from_near(1))
         .transact()
         .await?
         .into_result()?;
     let products = view(&contract, "get_products", json!({})).await?;
     assert_eq!(products[0]["key"], "checksum");
-    assert_eq!(products[1]["key"], "doom");
+    assert_eq!(products[1]["key"], doom.as_str());
+    assert_eq!(products.as_array().unwrap().len(), 2);
     assert_eq!(products[1]["developer"], dev2.id().as_str());
 
     // dev2 cannot record a build of dev's product.
@@ -214,14 +237,14 @@ async fn two_products_sale_resale_and_isolation_on_sandbox() -> anyhow::Result<(
 
     // Each developer records a build. The two builds contain the same file.
     add_build(&contract, &dev, "checksum", 'a', 'b').await?;
-    add_build(&contract, &dev2, "doom", 'c', 'b').await?;
+    add_build(&contract, &dev2, &doom, 'c', 'b').await?;
     let after_build = view(&contract, "get_product", json!({ "key": "checksum" })).await?;
     let after_build: u128 = after_build["storage_balance"].as_str().unwrap().parse()?;
     assert!(
         after_build < checksum_balance,
         "the build storage comes from the storage balance"
     );
-    for (product, commit) in [("checksum", 'a'), ("doom", 'c')] {
+    for (product, commit) in [("checksum", 'a'), (doom.as_str(), 'c')] {
         let m = view(
             &contract,
             "find_artifact",
@@ -272,21 +295,26 @@ async fn two_products_sale_resale_and_isolation_on_sandbox() -> anyhow::Result<(
     assert!(free1 >= free0, "free balance went down: {free0} -> {free1}");
     assert!(is_entitled(&contract, &alice, "checksum").await?);
     assert!(
-        !is_entitled(&contract, &alice, "doom").await?,
+        !is_entitled(&contract, &alice, &doom).await?,
         "a license of checksum does not cover doom"
     );
 
     // Alice also buys a license of doom: its numbers start at 1.
-    let doom: Value = alice
+    let doom_license: Value = alice
         .call(contract.id(), "buy")
-        .args_json(json!({ "product": "doom" }))
+        .args_json(json!({ "product": doom }))
         .deposit(NearToken::from_near(3))
         .max_gas()
         .transact()
         .await?
         .into_result()?
         .json()?;
-    assert_eq!(doom["token_id"], "doom:1");
+    assert_eq!(doom_license["token_id"], doom1.as_str());
+    assert_eq!(
+        doom_license["product"],
+        doom.as_str(),
+        "the product of a namespaced token id"
+    );
     let all = view(
         &contract,
         "licenses_for_owner",
@@ -297,17 +325,17 @@ async fn two_products_sale_resale_and_isolation_on_sandbox() -> anyhow::Result<(
     let only_doom = view(
         &contract,
         "licenses_for_owner",
-        json!({ "account_id": alice.id(), "product": "doom" }),
+        json!({ "account_id": alice.id(), "product": doom }),
     )
     .await?;
     assert_eq!(only_doom.as_array().unwrap().len(), 1);
-    assert_eq!(only_doom[0]["token_id"], "doom:1");
+    assert_eq!(only_doom[0]["token_id"], doom1.as_str());
 
     // Alice registers one computer on both licenses. She pays its storage:
     // the contract's free balance does not go down.
     let device = "d".repeat(64);
     let (free_a, _) = free_balance(contract.as_account()).await?;
-    for token in ["checksum:1", "doom:1"] {
+    for token in ["checksum:1", doom1.as_str()] {
         alice
             .call(contract.id(), "add_device")
             .args_json(json!({ "token_id": token, "device_id": device }))
@@ -321,7 +349,7 @@ async fn two_products_sale_resale_and_isolation_on_sandbox() -> anyhow::Result<(
         free_b >= free_a,
         "free balance went down: {free_a} -> {free_b}"
     );
-    for (product, token) in [("checksum", "checksum:1"), ("doom", "doom:1")] {
+    for (product, token) in [("checksum", "checksum:1"), (doom.as_str(), doom1.as_str())] {
         let seat = view(
             &contract,
             "device_license",
@@ -371,7 +399,7 @@ async fn two_products_sale_resale_and_isolation_on_sandbox() -> anyhow::Result<(
         .into_result()?;
     let listed = view(&contract, "get_listings", json!({ "product": "checksum" })).await?;
     assert_eq!(listed.as_array().unwrap().len(), 1);
-    let none = view(&contract, "get_listings", json!({ "product": "doom" })).await?;
+    let none = view(&contract, "get_listings", json!({ "product": doom })).await?;
     assert!(none.as_array().unwrap().is_empty());
     // Let the gas refund of the list call arrive before the balance read.
     worker.fast_forward(5).await?;
@@ -412,7 +440,7 @@ async fn two_products_sale_resale_and_isolation_on_sandbox() -> anyhow::Result<(
         "the buyer is entitled after the resale"
     );
     assert!(
-        is_entitled(&contract, &alice, "doom").await?,
+        is_entitled(&contract, &alice, &doom).await?,
         "the seller keeps her license of doom"
     );
     let seat = view(
@@ -425,10 +453,10 @@ async fn two_products_sale_resale_and_isolation_on_sandbox() -> anyhow::Result<(
     let seat = view(
         &contract,
         "device_license",
-        json!({ "product": "doom", "device_id": device, "version": "0.1.0" }),
+        json!({ "product": doom, "device_id": device, "version": "0.1.0" }),
     )
     .await?;
-    assert_eq!(seat["token_id"], "doom:1", "the seat in doom stays");
+    assert_eq!(seat["token_id"], doom1.as_str(), "the seat in doom stays");
     assert_eq!(seat["covers_version"], true);
     // Agent budget. Carol deposits with her full-access key, then gives an
     // agent a function-call key that can call only the two budget methods.
@@ -519,7 +547,7 @@ async fn two_products_sale_resale_and_isolation_on_sandbox() -> anyhow::Result<(
     // The key cannot change the limits: deposit_budget is not in its list.
     let limits = agent
         .call(contract.id(), "deposit_budget")
-        .args_json(json!({ "max_price": (100 * NEAR).to_string(), "products": ["doom"] }))
+        .args_json(json!({ "max_price": (100 * NEAR).to_string(), "products": [doom] }))
         .transact()
         .await;
     let err = failure(limits, "deposit_budget with a function-call key must fail");

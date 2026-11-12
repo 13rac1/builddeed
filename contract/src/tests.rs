@@ -7,10 +7,16 @@ const DAY_MS: u64 = 24 * 60 * 60 * 1000;
 const YOCTO: u128 = 1;
 /// The first product: developer dev.near.
 const P: &str = "checksum";
-/// The second product: developer dev2.near.
-const Q: &str = "doom";
+/// The second product: developer dev2.near, in its own namespace.
+const Q: &str = "doom.dev2.near";
 /// The first license of product P.
 const T1: &str = "checksum:1";
+/// The first and second licenses of product Q.
+const Q1: &str = "doom.dev2.near:1";
+const Q2: &str = "doom.dev2.near:2";
+/// The contract account. Its owner, dev.near, is the publisher: it can use
+/// any product key.
+const CONTRACT: &str = "licenses.dev.near";
 
 fn acc(s: &str) -> AccountId {
     s.parse().unwrap()
@@ -69,7 +75,7 @@ fn terms2() -> ProductTerms {
 /// Sets the caller, deposit and block time (ms) for the next call.
 fn call(who: &str, deposit: NearToken, now_ms: u64) {
     let mut b = VMContextBuilder::new();
-    b.current_account_id(acc("demo.near"))
+    b.current_account_id(acc(CONTRACT))
         .predecessor_account_id(acc(who))
         .signer_account_id(acc(who))
         .attached_deposit(deposit)
@@ -237,9 +243,18 @@ fn add_product_makes_the_caller_the_developer_and_keeps_the_rest_as_storage_bala
 
 #[test]
 fn product_key_rules() {
-    let max = "a".repeat(32);
-    let long = "a".repeat(33);
-    for good in ["ab", "1-a", "a-", "doom-2", max.as_str()] {
+    let max = "a".repeat(97);
+    let long = "a".repeat(98);
+    for good in [
+        "ab",
+        "1-a",
+        "a-",
+        "a_b",
+        "a.b",
+        "doom-2",
+        "doom.dev2.near",
+        max.as_str(),
+    ] {
         assert!(is_product_key(good), "{good}");
     }
     for bad in [
@@ -248,21 +263,37 @@ fn product_key_rules() {
         long.as_str(),
         "Doom",
         "-ab",
+        "_ab",
+        ".ab",
         "ab:1",
-        "a_b",
         "a b",
-        "a.b",
+        "a..b",
+        "a.",
+        "ab.",
     ] {
         assert!(!is_product_key(bad), "{bad}");
     }
 }
 
 #[test]
+fn short_key_rules() {
+    let max = "a".repeat(32);
+    let long = "a".repeat(33);
+    for good in ["ab", "1-a", "a-", max.as_str()] {
+        assert!(is_short_key(good), "{good}");
+    }
+    for bad in ["", "a", long.as_str(), "Ab", "-ab", "a_b", "a.b"] {
+        assert!(!is_short_key(bad), "{bad}");
+    }
+}
+
+#[test]
 fn add_product_refuses_a_bad_key() {
     let mut c = setup();
-    let long = "a".repeat(33);
-    for bad in ["a", long.as_str(), "Doom", "-ab", "ab:1"] {
-        call("dev2.near", near(1), 1_000);
+    let long = "a".repeat(98);
+    for bad in ["a", long.as_str(), "Doom", "-ab", "_ab", "ab:1", "a..b"] {
+        // The publisher: only the key rules apply.
+        call("dev.near", near(1), 1_000);
         let msg = panic_text(|| {
             c.add_product(bad.into(), terms2());
         });
@@ -271,11 +302,78 @@ fn add_product_refuses_a_bad_key() {
 }
 
 #[test]
+fn the_publisher_and_the_contract_account_can_use_any_key() {
+    let mut c = setup();
+    let long = "a".repeat(97);
+    for (who, key) in [
+        ("dev.near", "ab"),
+        ("dev.near", "x.dev2.near"),
+        ("dev.near", long.as_str()),
+        (CONTRACT, "cd"),
+        (CONTRACT, "a_b.c"),
+    ] {
+        call(who, near(1), 1_000);
+        let v = c.add_product(key.into(), terms2());
+        assert_eq!(v.developer, acc(who), "{key}");
+    }
+}
+
+#[test]
+fn another_account_uses_keys_in_its_own_namespace() {
+    let mut c = setup();
+    let long_name = format!("{}.dev2.near", "a".repeat(33));
+    let max_name = format!("{}.dev2.near", "a".repeat(32));
+    let refused = [
+        ("doom", "a short key"),
+        ("x1.dev.near", "the namespace of another account"),
+        ("x1.near", "the namespace of a parent account"),
+        ("xdev2.near", "a suffix with no dot"),
+        ("ab.xdev2.near", "a suffix with no dot"),
+        ("dev2.near", "the account with no name"),
+        ("a.dev2.near", "a name of 1 character"),
+        (long_name.as_str(), "a name of 33 characters"),
+        ("a.b.dev2.near", "a dot in the name"),
+        ("a_b.dev2.near", "_ in the name"),
+    ];
+    for (key, why) in refused {
+        call("dev2.near", near(1), 1_000);
+        let msg = panic_text(|| {
+            c.add_product(key.into(), terms2());
+        });
+        assert!(
+            msg.contains("Use a product key of the form <name>.dev2.near"),
+            "{key} ({why}): {msg}"
+        );
+    }
+    // These fail the key rules first.
+    for key in ["Ab.dev2.near", "-ab.dev2.near"] {
+        call("dev2.near", near(1), 1_000);
+        let msg = panic_text(|| {
+            c.add_product(key.into(), terms2());
+        });
+        assert!(msg.contains("The product key must have"), "{key}: {msg}");
+    }
+    for key in ["ab.dev2.near", "1-x.dev2.near", max_name.as_str()] {
+        call("dev2.near", near(1), 1_000);
+        let v = c.add_product(key.into(), terms2());
+        assert_eq!(v.developer, acc("dev2.near"), "{key}");
+    }
+}
+
+#[test]
 #[should_panic(expected = "A product with this key exists")]
 fn add_product_refuses_a_key_in_use() {
     let mut c = setup();
-    call("dev2.near", near(1), 1_000);
+    call("dev.near", near(1), 1_000);
     c.add_product(P.into(), terms2());
+}
+
+#[test]
+#[should_panic(expected = "A product with this key exists")]
+fn add_product_refuses_a_namespaced_key_in_use() {
+    let mut c = setup_two();
+    call("dev2.near", near(1), 1_000);
+    c.add_product(Q.into(), terms2());
 }
 
 #[test]
@@ -423,17 +521,20 @@ fn set_prices_of_unknown_product_fails() {
 
 // ----- Storage balance -----
 
-/// A contract with product P and product "zero" of dev2.near, whose
-/// storage balance is 0: dev2 attached the exact cost of the record.
+/// A product of dev2.near with a storage balance of 0.
+const Z: &str = "zero.dev2.near";
+
+/// A contract with product P and product Z, whose storage balance is 0:
+/// dev2 attached the exact cost of the record.
 fn with_zero_balance() -> Contract {
     let mut c = setup();
-    // "zero" and "aaaa" have the same key length and terms, so their
+    // Z and "aaaa.dev2.near" have the same key length and terms, so their
     // records have the same size.
     call("dev2.near", near(1), 1_000);
-    let v = c.add_product("aaaa".into(), terms2());
+    let v = c.add_product("aaaa.dev2.near".into(), terms2());
     let record = near(1).as_yoctonear() - v.storage_balance.as_yoctonear();
     call("dev2.near", yocto(record), 1_000);
-    let v = c.add_product("zero".into(), terms2());
+    let v = c.add_product(Z.into(), terms2());
     assert_eq!(v.storage_balance, yocto(0));
     c
 }
@@ -443,12 +544,7 @@ fn with_zero_balance() -> Contract {
 fn add_build_fails_when_the_storage_balance_is_too_low() {
     let mut c = with_zero_balance();
     call("dev2.near", yocto(0), 5_000);
-    c.add_build(
-        "zero".into(),
-        "0.1.0".into(),
-        commit('a'),
-        vec![artifact('a')],
-    );
+    c.add_build(Z.into(), "0.1.0".into(), commit('a'), vec![artifact('a')]);
 }
 
 #[test]
@@ -457,7 +553,7 @@ fn set_payees_fails_when_the_storage_balance_is_too_low() {
     let mut c = with_zero_balance();
     call("dev2.near", yocto(0), 5_000);
     c.set_payees(
-        "zero".into(),
+        Z.into(),
         vec![
             Payee {
                 account_id: acc("dev2.near"),
@@ -476,25 +572,20 @@ fn add_storage_raises_the_balance_and_a_build_takes_its_storage_from_it() {
     let mut c = with_zero_balance();
     // Anyone can pay.
     call("alice.near", near(1), 5_000);
-    assert_eq!(c.add_storage("zero".into()), near(1));
+    assert_eq!(c.add_storage(Z.into()), near(1));
     call("alice.near", near(1), 5_000);
-    assert_eq!(c.add_storage("zero".into()), near(2));
-    assert_eq!(storage_balance(&c, "zero"), near(2).as_yoctonear());
+    assert_eq!(c.add_storage(Z.into()), near(2));
+    assert_eq!(storage_balance(&c, Z), near(2).as_yoctonear());
     call("dev2.near", yocto(0), 6_000);
     let before = env::storage_usage();
-    c.add_build(
-        "zero".into(),
-        "0.1.0".into(),
-        commit('a'),
-        vec![artifact('a')],
-    );
+    c.add_build(Z.into(), "0.1.0".into(), commit('a'), vec![artifact('a')]);
     let used = cost_since(before);
     assert!(used > 0);
-    assert_eq!(storage_balance(&c, "zero"), near(2).as_yoctonear() - used);
+    assert_eq!(storage_balance(&c, Z), near(2).as_yoctonear() - used);
     // The other product's balance does not change.
     let p_before = storage_balance(&c, P);
     call("alice.near", near(1), 6_000);
-    c.add_storage("zero".into());
+    c.add_storage(Z.into());
     assert_eq!(storage_balance(&c, P), p_before);
 }
 
@@ -558,12 +649,12 @@ fn token_ids_count_per_product() {
     call("alice.near", near(5), 10_000);
     assert_eq!(c.buy(P.into()).token_id, "checksum:1");
     call("bob.near", near(3), 10_000);
-    assert_eq!(c.buy(Q.into()).token_id, "doom:1");
+    assert_eq!(c.buy(Q.into()).token_id, Q1);
     call("bob.near", near(5), 10_000);
     assert_eq!(c.buy(P.into()).token_id, "checksum:2");
     call("alice.near", near(3), 10_000);
     let l = c.buy(Q.into());
-    assert_eq!(l.token_id, "doom:2");
+    assert_eq!(l.token_id, Q2);
     // Product Q has its own update period.
     assert_eq!(l.updates_until_ms, 10_000 + 30 * DAY_MS);
     assert_eq!(c.get_product(P.into()).unwrap().licenses_sold, 2);
@@ -590,14 +681,18 @@ fn product_name_with_quote_and_backslash_gives_valid_metadata() {
     let mut t = terms2();
     t.name = "Odd \"name\\".into();
     call("dev2.near", near(1), 1_000);
-    c.add_product("odd".into(), t);
+    c.add_product("odd.dev2.near".into(), t);
     call("alice.near", near(3), 10_000);
-    c.buy("odd".into());
-    let meta = c.nft_token("odd:1".into()).unwrap().metadata.unwrap();
+    c.buy("odd.dev2.near".into());
+    let meta = c
+        .nft_token("odd.dev2.near:1".into())
+        .unwrap()
+        .metadata
+        .unwrap();
     assert_eq!(meta.title.as_deref(), Some("Odd \"name\\ license #1"));
     let v: near_sdk::serde_json::Value =
         near_sdk::serde_json::from_str(&meta.extra.unwrap()).expect("valid JSON");
-    assert_eq!(v["product"], "odd");
+    assert_eq!(v["product"], "odd.dev2.near");
 }
 
 #[test]
@@ -690,7 +785,7 @@ fn renew_uses_the_price_period_and_payees_of_its_product() {
     call("bob.near", near(3), 10_000);
     c.buy(Q.into());
     call("bob.near", near(2), 20_000);
-    let l = c.renew("doom:1".into());
+    let l = c.renew(Q1.into());
     assert_eq!(l.updates_until_ms, 10_000 + 2 * 30 * DAY_MS);
     let paid = transfers();
     let fee = near(1).as_yoctonear() * 300 / 10_000;
@@ -792,9 +887,9 @@ fn resale_pays_the_fee_the_royalty_of_its_product_and_the_seller() {
 
     // Product Q: 3% fee, 5% royalty to dev2, 92% to the seller.
     call("alice.near", yocto(YOCTO), 20_000);
-    c.list("doom:1".into(), near(2));
+    c.list(Q1.into(), near(2));
     call("bob.near", near(2), 30_000);
-    c.buy_listed("doom:1".into(), near(2));
+    c.buy_listed(Q1.into(), near(2));
     let paid = transfers();
     assert_eq!(amount_of(&paid, "fee.near"), n(60));
     assert_eq!(amount_of(&paid, "dev2.near"), n(100));
@@ -863,7 +958,7 @@ fn the_lowest_resale_price_is_the_renewal_price_of_the_product() {
     c.buy(Q.into());
     // 1 NEAR is the renewal price of Q, and below the renewal price of P.
     call("alice.near", yocto(YOCTO), 20_000);
-    c.list("doom:1".into(), near(1));
+    c.list(Q1.into(), near(1));
     let msg = panic_text(|| c.list(T1.into(), near(1)));
     assert!(msg.contains("at least the renewal price"), "{msg}");
 }
@@ -961,11 +1056,7 @@ fn get_listings_filters_by_product_before_the_page() {
         call(who, deposit, 10_000);
         c.buy(product.into());
     }
-    for (id, who) in [
-        ("doom:1", "a.near"),
-        ("checksum:1", "b.near"),
-        ("doom:2", "c.near"),
-    ] {
+    for (id, who) in [(Q1, "a.near"), ("checksum:1", "b.near"), (Q2, "c.near")] {
         call(who, yocto(YOCTO), 20_000);
         c.list(id.into(), near(3));
     }
@@ -975,7 +1066,7 @@ fn get_listings_filters_by_product_before_the_page() {
     );
     assert_eq!(
         ids(c.get_listings(Some(Q.into()), None, None)),
-        vec!["doom:1", "doom:2"]
+        vec![Q1, Q2]
     );
     assert_eq!(c.get_listings(None, None, None).len(), 3);
     // from_index counts the listings of the product only.
@@ -1002,7 +1093,7 @@ fn licenses_for_owner_filters_by_product() {
     assert_eq!(ids(c.licenses_for_owner(alice(), Some(P.into()))), vec![T1]);
     assert_eq!(
         ids(c.licenses_for_owner(alice(), Some(Q.into()))),
-        vec!["doom:1", "doom:2"]
+        vec![Q1, Q2]
     );
     assert!(c
         .licenses_for_owner(alice(), Some("check".into()))
@@ -1566,7 +1657,7 @@ fn build_views_see_only_their_product() {
     call("alice.near", near(3), 10_000);
     c.buy(Q.into());
     call("alice.near", NearToken::from_millinear(10), 20_000);
-    c.add_device("doom:1".into(), dev('a'));
+    c.add_device(Q1.into(), dev('a'));
 
     assert!(c.get_build(Q.into(), "0.1.0".into()).is_none());
     assert!(c.get_builds(Q.into(), None, None).is_empty());
@@ -1591,11 +1682,11 @@ fn one_computer_can_have_a_seat_in_two_products() {
     call("alice.near", near(3), 10_000);
     c.buy(Q.into());
     add(&mut c, T1, 'a');
-    add(&mut c, "doom:1", 'a');
+    add(&mut c, Q1, 'a');
     let in_p = c.device_license(P.into(), dev('a'), "x".into()).unwrap();
     let in_q = c.device_license(Q.into(), dev('a'), "x".into()).unwrap();
     assert_eq!(in_p.token_id, T1);
-    assert_eq!(in_q.token_id, "doom:1");
+    assert_eq!(in_q.token_id, Q1);
     call("alice.near", yocto(YOCTO), 20_000);
     c.remove_device(T1.into(), dev('a'));
     assert!(c.device_license(P.into(), dev('a'), "x".into()).is_none());
@@ -1603,7 +1694,7 @@ fn one_computer_can_have_a_seat_in_two_products() {
         c.device_license(Q.into(), dev('a'), "x".into())
             .unwrap()
             .token_id,
-        "doom:1"
+        Q1
     );
 }
 
@@ -1612,9 +1703,9 @@ fn seats_follow_max_devices_of_the_product() {
     let mut c = setup_two();
     call("alice.near", near(3), 10_000);
     c.buy(Q.into());
-    add(&mut c, "doom:1", 'a');
+    add(&mut c, Q1, 'a');
     let msg = panic_text(|| {
-        add(&mut c, "doom:1", 'b');
+        add(&mut c, Q1, 'b');
     });
     assert!(msg.contains("already has 1 computers"), "{msg}");
 }
@@ -1959,13 +2050,18 @@ fn buy_from_budget_refuses_a_product_added_after_the_deposit() {
     let mut t = terms2();
     t.price = start.max_price;
     call("dev3.near", near(1), 10_000);
-    c.add_product("late".into(), t);
+    c.add_product("late.dev3.near".into(), t);
     let msg = panic_text(|| {
-        buy_from_budget(&mut c, "alice.near", "late");
+        buy_from_budget(&mut c, "alice.near", "late.dev3.near");
     });
     assert!(msg.contains("does not allow this product"), "{msg}");
     assert_eq!(budget(&c, "alice.near"), start);
-    assert_eq!(c.get_product("late".into()).unwrap().licenses_sold, 0);
+    assert_eq!(
+        c.get_product("late.dev3.near".into())
+            .unwrap()
+            .licenses_sold,
+        0
+    );
 }
 
 #[test]
@@ -2322,7 +2418,7 @@ fn a_sale_logs_the_nep171_mint_event() {
 #[test]
 fn emit_mint_events_logs_the_owner_of_each_token() {
     let mut c = with_license();
-    call("demo.near", yocto(0), 20_000);
+    call(CONTRACT, yocto(0), 20_000);
     c.emit_mint_events(vec![T1.into()]);
     let logs = near_sdk::test_utils::get_logs();
     assert_eq!(logs.len(), 1, "{logs:?}");
@@ -2338,4 +2434,70 @@ fn emit_mint_events_is_private() {
     call("eve.near", yocto(0), 20_000);
     let e = panic_text(|| c.emit_mint_events(vec![T1.into()]));
     assert!(e.contains("private"), "{e}");
+}
+
+// ----- Namespaced product keys -----
+
+#[test]
+fn a_namespaced_product_works_from_sale_to_build() {
+    let mut c = setup_two();
+    call("alice.near", near(3), 10_000);
+    let l = c.buy(Q.into());
+    assert_eq!(l.token_id, Q1);
+    assert_eq!(l.product, Q);
+    assert_eq!(
+        c.nft_token(Q1.into())
+            .unwrap()
+            .metadata
+            .unwrap()
+            .media
+            .as_deref(),
+        Some("https://builddeed.dev/nft/doom.dev2.near.png")
+    );
+    assert_eq!(
+        ids(c.licenses_for_owner(acc("alice.near"), Some(Q.into()))),
+        vec![Q1]
+    );
+    add(&mut c, Q1, 'a');
+    call("dev2.near", yocto(0), 20_000);
+    c.add_build(Q.into(), "1.0".into(), commit('a'), vec![artifact('a')]);
+    let d = c
+        .device_license(Q.into(), dev('a'), "1.0".into())
+        .expect("seat");
+    assert_eq!(d.token_id, Q1);
+    assert!(d.covers_version);
+    assert!(c.is_entitled(acc("alice.near"), Q.into(), "1.0".into()));
+    assert_eq!(c.find_artifact(Q.into(), sha('a')).unwrap().version, "1.0");
+    let latest = c
+        .latest_build(Q.into(), "linux-x86_64".into())
+        .expect("latest");
+    assert_eq!(latest.version, "1.0");
+    // The product "doom" of another account does not see this product.
+    call("dev.near", near(1), 20_000);
+    c.add_product("doom".into(), terms2());
+    assert!(c
+        .device_license("doom".into(), dev('a'), "1.0".into())
+        .is_none());
+    assert!(c.find_artifact("doom".into(), sha('a')).is_none());
+    call("alice.near", yocto(YOCTO), 20_000);
+    c.list(Q1.into(), near(2));
+    assert_eq!(ids(c.get_listings(Some(Q.into()), None, None)), vec![Q1]);
+    assert!(c.get_listings(Some("doom".into()), None, None).is_empty());
+}
+
+#[test]
+fn on_a_top_level_contract_account_the_registrar_is_not_a_publisher() {
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc("builddeed.testnet"))
+        .predecessor_account_id(acc("testnet"))
+        .signer_account_id(acc("testnet"))
+        .attached_deposit(near(1))
+        .account_balance(near(100))
+        .block_timestamp(1_000_000_000);
+    testing_env!(b.build());
+    let mut c = Contract::new(acc("fee.near"), 300, None);
+    let e = panic_text(|| {
+        c.add_product("doom".into(), terms());
+    });
+    assert!(e.contains("<name>.testnet"), "{e}");
 }
