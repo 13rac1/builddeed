@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="BuildDeed license">
+  <!-- The license image of a product that has no image of its own. The
+       build copies default.png (rendered from this file) to nft/<key>.png. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#141a22"/><stop offset="1" stop-color="#1f3a44"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7f5f0"/><stop offset="1" stop-color="#e6e1d4"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <text x="256" y="52" text-anchor="middle" font-family="monospace" font-size="18" letter-spacing="4" fill="#bfe8e0">BUILDDEED LICENSE</text>
+  <!-- the deed -->
+  <path d="M150 88 h160 l62 62 v206 a22 22 0 0 1 -22 22 h-200 a22 22 0 0 1 -22 -22 v-246 a22 22 0 0 1 22 -22 z" fill="url(#paper)" stroke="#0b2a26" stroke-width="4"/>
+  <path d="M310 88 v40 a22 22 0 0 0 22 22 h40" fill="#d6d0c0" stroke="#0b2a26" stroke-width="4" stroke-linejoin="round"/>
+  <g stroke="#9aa39f" stroke-width="8" stroke-linecap="round">
+    <path d="M168 162 h110"/><path d="M168 194 h170"/><path d="M168 226 h150"/><path d="M168 258 h90"/>
+  </g>
+  <!-- the seal -->
+  <circle cx="318" cy="318" r="58" fill="#c2410c" stroke="#7c2a08" stroke-width="4"/>
+  <circle cx="318" cy="318" r="44" fill="none" stroke="#fbd5c1" stroke-width="2" stroke-dasharray="4 5"/>
+  <path d="M294 318 l17 17 l31 -34" fill="none" stroke="#ffffff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="256" y="440" text-anchor="middle" font-family="monospace" font-size="15" fill="#bfe8e0">verified official builds · resellable</text>
+  <text x="256" y="476" text-anchor="middle" font-family="monospace" font-size="12" fill="#8fc8bd">NEAR testnet</text>
+</svg>

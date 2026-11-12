@@ -1,20 +1,19 @@
 // The store front: the app grid from the chain. The build wrote the same
 // cards into the HTML; this script replaces them with live prices and adds
 // products that were added after the build.
-import { h, mountChrome } from "../ui.js";
-import { loadProducts, formatNear, productPath, nftImage } from "../near.js";
+import { h, mountChrome, licenseImage } from "../ui.js";
+import { loadProducts, formatNear, productPath } from "../near.js";
 
 mountChrome();
 
 /** One app card. The whole card is a link to the product page. */
 function appCard(p) {
-  const img = p.shot || nftImage(p.key);
   return h(
     "a",
     { class: "app-card", href: productPath(p.key) },
-    img
-      ? h("span", { class: p.pixel ? "app-media pixel" : "app-media" }, h("img", { src: img, alt: p.alt || p.name, width: 640, height: 480, loading: "lazy" }))
-      : h("span", { class: "app-media placeholder", "aria-hidden": "true" }, p.name.slice(0, 1).toUpperCase()),
+    p.shot
+      ? h("span", { class: p.pixel ? "app-media pixel" : "app-media" }, h("img", { src: p.shot, alt: p.alt || p.name, width: 640, height: 480, loading: "lazy" }))
+      : h("span", { class: "app-media license" }, licenseImage(p.key, { alt: `${p.name} license image`, width: 512, height: 512, loading: "lazy" })),
     h(
       "span",
       { class: "app-body" },

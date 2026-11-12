@@ -1,6 +1,21 @@
 // Add your product: the add_product form of the developer area.
-import { h, mountChrome, busy, showOk } from "../ui.js";
-import { CONTRACT, view, call, onAccount, parseNear, formatNear, contractError, productPath } from "../near.js";
+import { h, mountChrome, busy, showOk, showError } from "../ui.js";
+import {
+  CONTRACT,
+  view,
+  call,
+  onAccount,
+  currentAccount,
+  signIn,
+  parseNear,
+  formatNear,
+  contractError,
+  productPath,
+  isProductKey,
+  isShortKey,
+  isPublisher,
+  productKeyFor,
+} from "../near.js";
 
 mountChrome("developers");
 const main = document.getElementById("main");
@@ -21,11 +36,6 @@ let feeBps = 300;
 // ----- Input checks -----
 
 const bytes = (s) => new TextEncoder().encode(s).length;
-
-/** 2 to 32 characters a-z, 0-9 and -, starting with a letter or digit. */
-function isProductKey(k) {
-  return k.length >= 2 && k.length <= 32 && /^[a-z0-9][a-z0-9-]*$/.test(k);
-}
 
 /** A NEAR account id: 2 to 64 characters, parts of a-z 0-9 _ - between dots. */
 function isAccountId(a) {
@@ -69,7 +79,7 @@ function field(id, label, input, help) {
 const text = (attrs = {}) => h("input", { type: "text", autocomplete: "off", ...attrs });
 
 const f = {
-  key: field("p-key", "Product key", text({ placeholder: "my-app", maxlength: "32", spellcheck: "false" }), "2 to 32 characters: a-z, 0-9 and -. It starts with a letter or digit. It is in your token ids (my-app:1) and links. You cannot change it."),
+  key: field("p-key", "Product key", text({ placeholder: "my-app", maxlength: "32", spellcheck: "false" }), ""),
   name: field("p-name", "Name", text({ placeholder: "My App" }), `1 to ${MAX_NAME} bytes.`),
   description: field("p-description", "Description", h("textarea", { rows: "3" }), `One or two sentences for the website. At most ${MAX_DESCRIPTION} bytes.`),
   url: field("p-url", "Source or product page (optional)", h("input", { type: "url", placeholder: "https://github.com/you/my-app" }), `An https URL, at most ${MAX_URL} characters.`),
@@ -80,6 +90,33 @@ const f = {
   seats: field("p-seats", "Seats per license", text({ inputmode: "numeric", value: "3" }), `The number of computers on one license. 1 to ${MAX_DEVICES}. You cannot change it later.`),
   deposit: field("p-deposit", "Storage deposit (NEAR)", text({ inputmode: "decimal", value: "0.5" }), "The product record takes about 0.005 NEAR. The rest is the storage balance of your product: add_build takes the storage of each build record from it. 0.5 NEAR is enough for many releases."),
 };
+
+// The product key. The publisher can use any key; every other account gets
+// <name>.<its account>, so nobody can take a name in another account.
+const NAME_RULE = "Use 2 to 32 characters a-z, 0-9 and -, and start with a letter or digit.";
+const KEY_RULE_PUBLISHER = "Use 2 to 97 characters a-z, 0-9, -, _ and ., start with a letter or digit, and put no two dots together.";
+const keyFull = h("span", { class: "key-full mono", "aria-live": "polite" });
+f.key.el.insertBefore(keyFull, f.key.input.nextSibling);
+const keyHelp = f.key.el.querySelector(".help") || h("span", { class: "help", id: "p-key-help" });
+if (!keyHelp.parentNode) f.key.el.insertBefore(keyHelp, f.key.error);
+const keyLabel = f.key.el.querySelector("span");
+
+function showKeyRule(acct) {
+  const publisher = acct && isPublisher(acct);
+  keyLabel.textContent = publisher ? "Product key" : "Product key (the part before your account)";
+  f.key.input.maxLength = publisher ? 97 : 32;
+  keyHelp.textContent = publisher
+    ? "You are the publisher: you can use any product key. 2 to 97 characters a-z, 0-9, -, _ and .; it starts with a letter or digit. You cannot change it."
+    : "2 to 32 characters: a-z, 0-9 and -, starting with a letter or digit. Your product key is the name, a dot and your account, so nobody else can take a name in your account. You cannot change it.";
+  showFullKey();
+}
+
+function showFullKey() {
+  const acct = currentAccount();
+  const typed = f.key.input.value.trim() || "<name>";
+  keyFull.textContent = acct && isPublisher(acct) ? "" : `Product key: ${acct ? productKeyFor(acct, typed) : `${typed}.<your account>`}`;
+}
+f.key.input.addEventListener("input", showFullKey);
 
 // Payees: an account and a share in percent on each row.
 const payeeRows = h("div", { class: "form" });
@@ -123,8 +160,12 @@ function readForm() {
   Object.values(f).forEach((fld) => (fld.error.textContent = ""));
   payeeError.textContent = "";
 
-  const key = f.key.input.value.trim();
-  if (!isProductKey(key)) fail(f.key, "Use 2 to 32 characters a-z, 0-9 and -, and start with a letter or digit.");
+  const acct = currentAccount();
+  const typed = f.key.input.value.trim();
+  const key = productKeyFor(acct, typed);
+  if (!acct) fail(f.key, "Connect your wallet: the product key ends with your account.");
+  else if (isPublisher(acct) ? !isProductKey(typed) : !isShortKey(typed))
+    fail(f.key, isPublisher(acct) ? KEY_RULE_PUBLISHER : NAME_RULE);
 
   const name = f.name.input.value.trim();
   if (bytes(name) < 1 || bytes(name) > MAX_NAME) fail(f.name, `The name must have 1 to ${MAX_NAME} bytes.`);
@@ -229,9 +270,11 @@ const form = h(
   status
 );
 
-form.addEventListener("submit", (e) => {
+form.addEventListener("submit", async (e) => {
   e.preventDefault();
   status.replaceChildren();
+  // The key ends with the account, so the page needs it before the check.
+  if (!currentAccount()) await signIn().catch(showError);
   const input = readForm();
   if (!input) {
     status.replaceChildren(h("p", { class: "warn-text" }, "Correct the fields in red."));
@@ -262,8 +305,10 @@ form.addEventListener("submit", (e) => {
   });
 });
 
-// Put the signed-in account in the first payee row while it is empty.
+// Put the signed-in account in the first payee row while it is empty, and
+// show the key rule of the account.
 onAccount((acct) => {
+  showKeyRule(acct);
   const first = payeeRows.firstElementChild?.inputs.acct;
   if (acct && first && !first.value) first.value = acct;
 });

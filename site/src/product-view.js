@@ -1,7 +1,7 @@
 // The product page: /p/<key>/ (a static page from the build), and 404.html
 // for a product that was added after the last build. This module builds the
 // whole page from live data and replaces the static text.
-import { h, busy, showOk, markup } from "./ui.js";
+import { h, busy, showOk, markup, licenseImage } from "./ui.js";
 import {
   viewOf,
   call,
@@ -12,7 +12,6 @@ import {
   accountLink,
   marketLink,
   verifyLink,
-  nftImage,
   termLines,
   FAUCET,
 } from "./near.js";
@@ -86,7 +85,6 @@ function moneyBars(p) {
 /** Fills `main` with the page of product `p` (a product object from loadProducts). */
 export function renderProduct(main, p) {
   document.title = `${p.name} - BuildDeed`;
-  const art = nftImage(p.key);
   const used = h("span", { class: "used" });
   const owned = h("div", {});
   const downloads = h("div", { class: "card" }, h("div", { class: "skeleton" }), h("div", { class: "skeleton" }));
@@ -110,7 +108,7 @@ export function renderProduct(main, p) {
         "div",
         { class: "product-media" },
         p.shot ? h("img", { class: p.pixel ? "shot pixel" : "shot", src: p.shot, alt: p.alt || p.name, width: 640, height: 480 }) : null,
-        art ? h("img", { class: "license-badge", src: art, alt: `${p.name} license image`, width: 96, height: 96 }) : null
+        licenseImage(p.key, { class: "license-badge", alt: `${p.name} license image`, width: 96, height: 96 })
       ),
       h(
         "div",

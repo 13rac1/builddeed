@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { defineConfig } from "vite";
-import { fetchProducts, writeProductPages, appCardHtml, sitemapXml } from "./scripts/static-pages.mjs";
+import { fetchProducts, writeProductPages, appCardHtml, sitemapXml, defaultLicenseImages } from "./scripts/static-pages.mjs";
 
 const root = import.meta.dirname;
 
@@ -19,8 +19,9 @@ const pages = [
 ];
 
 // One get_products request at build time: a static page for each product
-// (p/<key>/index.html, not in git), the app grid of the home page, and the
-// sitemap. The build fails when the RPC does not answer.
+// (p/<key>/index.html, not in git), the app grid of the home page, the
+// sitemap, and nft/<key>.png for each product with no own license image.
+// The build fails when the RPC does not answer.
 const products = await fetchProducts();
 const productInputs = writeProductPages(products, root);
 
@@ -39,6 +40,9 @@ export default defineConfig({
       },
       generateBundle() {
         this.emitFile({ type: "asset", fileName: "sitemap.xml", source: sitemapXml(products) });
+        for (const [fileName, source] of defaultLicenseImages(products, root)) {
+          this.emitFile({ type: "asset", fileName, source });
+        }
       },
     },
   ],

@@ -1,4 +1,4 @@
-import { h, mountChrome, busy, showOk, showError } from "../ui.js";
+import { h, mountChrome, busy, showOk, showError, licenseImage } from "../ui.js";
 import { view, call, onAccount, signIn, formatNear, formatDate, parseNear, productPath, marketLink, loadProducts, tokenNumber, contractError, CONTRACT } from "../near.js";
 
 mountChrome();
@@ -307,14 +307,7 @@ function card(l, p) {
   return h(
     "div",
     { class: "card" },
-    h("img", {
-      class: "license-art",
-      src: `nft/${l.product}.svg`,
-      alt: `${p.name} license image`,
-      width: "128",
-      height: "128",
-      loading: "lazy",
-    }),
+    licenseImage(l.product, { class: "license-art", alt: `${p.name} license image`, width: "128", height: "128", loading: "lazy" }),
     h("a", { class: "eyebrow", href: productPath(p.key) }, p.name),
     h("h3", {}, `License #${tokenNumber(l.token_id)}`),
     h(

@@ -285,7 +285,8 @@ tr.highlight td { background: var(--accent-soft); font-weight: 600; }
 .app-media { display: block; aspect-ratio: 16 / 10; background: #000; overflow: hidden; border-bottom: 1px solid var(--line); }
 .app-media img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
 .app-media.pixel img { image-rendering: pixelated; }
-.app-media.placeholder { display: grid; place-items: center; background: linear-gradient(135deg, var(--accent), var(--seg-2)); color: var(--accent-ink); font: 800 3rem var(--sans); }
+.app-media.license { background: #141a22; }
+.app-media.license img { object-fit: contain; }
 a.eyebrow { text-decoration: none; }
 .app-body { display: grid; gap: 4px; padding: 16px 18px 18px; align-content: start; grid-template-columns: 1fr auto; }
 .app-name { grid-column: 1 / -1; font-weight: 700; font-size: 1.15rem; }
@@ -339,3 +340,4 @@ pre.code { padding: 12px 14px; overflow-x: auto; font-size: 0.85rem; margin: 8px
 .card.next { margin-top: 28px; }
 .card.next h2 { font-size: 1.25rem; }
 .trust li { margin: 6px 0; }
+.key-full { font-size: 0.9rem; color: var(--accent); overflow-wrap: anywhere; }

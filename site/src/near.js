@@ -5,7 +5,7 @@ import { NearConnector } from "@hot-labs/near-connect";
 import { CONTRACT, NETWORK, RPC, DEFAULT_PRODUCT, withExtras, formatNear, productPath } from "./catalog.js";
 
 export { CONTRACT, NETWORK, RPC, DEFAULT_PRODUCT, formatNear, productPath };
-export { SITE, EXTRAS, nftImage, termLines, isProductKey } from "./catalog.js";
+export { SITE, EXTRAS, nftImage, DEFAULT_NFT, termLines, isProductKey, isShortKey, isPublisher, productKeyFor } from "./catalog.js";
 
 /** The repository of BuildDeed itself. */
 export const BUILDDEED_REPO = "https://github.com/13rac1/builddeed";

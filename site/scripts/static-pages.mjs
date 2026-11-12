@@ -3,7 +3,7 @@
 // /p/<key>/index.html, the static app grid of the home page, and the
 // sitemap. The facts are in the HTML, so a reader without JavaScript (an
 // agent, a crawler) gets them; the page script then adds live data.
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CONTRACT,
@@ -85,7 +85,7 @@ ${head({
   title: `${p.name} - BuildDeed`,
   description: `${lead} License: ${price} NEAR on NEAR testnet.`.trim(),
   path,
-  image: p.shot || "/og.png",
+  image: p.shot || art,
   extra: `\n  <script type="application/ld+json">${jsonForScript(ld)}</script>`,
 })}
 <body>
@@ -142,9 +142,11 @@ export function writeProductPages(products, root) {
 /** One card of the app grid, as static HTML. The home page script builds
  * the same cards from live data. */
 export function appCardHtml(p) {
-  const img = p.shot || nftImage(p.key);
+  const media = p.shot
+    ? `<span class="app-media${p.pixel ? " pixel" : ""}"><img src="${esc(p.shot)}" alt="${esc(p.alt || p.name)}" width="640" height="480" loading="lazy"></span>`
+    : `<span class="app-media license"><img src="${esc(nftImage(p.key))}" alt="${esc(p.name)} license image" width="512" height="512" loading="lazy"></span>`;
   return `<a class="app-card" href="${esc(productPath(p.key))}">
-      ${img ? `<span class="app-media${p.pixel ? " pixel" : ""}"><img src="${esc(img)}" alt="${esc(p.alt || p.name)}" width="640" height="480" loading="lazy"></span>` : `<span class="app-media placeholder" aria-hidden="true">${esc(p.name.slice(0, 1).toUpperCase())}</span>`}
+      ${media}
       <span class="app-body">
         <span class="app-name">${esc(p.name)}</span>
         <span class="app-desc">${esc(p.description || "")}</span>
@@ -172,4 +174,13 @@ export function sitemapXml(products) {
 ${paths.map((p) => `  <url><loc>${SITE}${p}</loc></url>`).join("\n")}
 </urlset>
 `;
+}
+
+/** The license images that the build adds: nft/<key>.png for each product
+ * that has no own image in public/nft/, as a copy of public/nft/default.png.
+ * Returns [fileName, bytes] pairs. */
+export function defaultLicenseImages(products, root) {
+  const nft = join(root, "public", "nft");
+  const generic = readFileSync(join(nft, "default.png"));
+  return products.filter((p) => !existsSync(join(nft, `${p.key}.png`))).map((p) => [`nft/${p.key}.png`, generic]);
 }

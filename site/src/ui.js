@@ -9,6 +9,8 @@ import {
   BUILDDEED_REPO,
   SDK_REPO,
   CONTRACT,
+  nftImage,
+  DEFAULT_NFT,
   accountLink,
   contractError,
 } from "./near.js";
@@ -212,4 +214,14 @@ export function chips(label, options, value, onSelect) {
       h("button", { type: "button", class: "chip", "aria-pressed": v === value ? "true" : "false", "data-value": v, onclick: () => onSelect(v) }, text)
     )
   );
+}
+
+/** The license image of a product. A product added after the last build
+ * has no nft/<key>.png yet: the page then shows the generic image. */
+export function licenseImage(key, attrs = {}) {
+  const img = h("img", { src: nftImage(key), ...attrs });
+  img.addEventListener("error", () => {
+    if (!img.src.endsWith(DEFAULT_NFT)) img.src = DEFAULT_NFT;
+  });
+  return img;
 }
