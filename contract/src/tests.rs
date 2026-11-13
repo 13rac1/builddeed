@@ -2343,7 +2343,10 @@ fn a_license_has_the_image_of_its_product() {
         t.metadata.unwrap().media.as_deref(),
         Some("https://builddeed.dev/nft/checksum.png")
     );
-    assert_eq!(c.nft_metadata().base_uri.as_deref(), Some(NFT_BASE_URI));
+    assert_eq!(
+        c.nft_metadata().base_uri.as_deref(),
+        Some("https://builddeed.dev/nft")
+    );
     let listed = c.nft_tokens(None, None);
     assert_eq!(
         listed[0].metadata.as_ref().unwrap().media.as_deref(),
@@ -2500,4 +2503,24 @@ fn on_a_top_level_contract_account_the_registrar_is_not_a_publisher() {
         c.add_product("doom".into(), terms());
     });
     assert!(e.contains("<name>.testnet"), "{e}");
+}
+
+#[test]
+fn a_testnet_contract_serves_images_from_the_testnet_store() {
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc("licenses.builddeed.testnet"))
+        .predecessor_account_id(acc("builddeed.testnet"))
+        .signer_account_id(acc("builddeed.testnet"))
+        .account_balance(near(100))
+        .block_timestamp(1_000_000_000);
+    testing_env!(b.build());
+    let c = Contract::new(acc("fee.testnet"), 300, None);
+    assert_eq!(
+        c.nft_metadata().base_uri.as_deref(),
+        Some("https://testnet.builddeed.dev/nft")
+    );
+    assert_eq!(
+        media_of("doom:1"),
+        "https://testnet.builddeed.dev/nft/doom.png"
+    );
 }

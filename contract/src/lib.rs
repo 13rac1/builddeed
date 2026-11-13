@@ -62,9 +62,16 @@ const MAX_PAYEES: usize = 16;
 const MAX_DEVICES: u8 = 16;
 const MAX_VERSIONS: usize = 1_000;
 const MAX_BUDGET_PRODUCTS: usize = 16;
-/// Where wallets find the image of a license: `<NFT_BASE_URI>/<product>.svg`.
-/// The website serves one image for each product.
-pub const NFT_BASE_URI: &str = "https://builddeed.dev/nft";
+/// Where wallets find the images of licenses: the website of the contract's
+/// network serves `nft/<product>.png`. A contract on a `.testnet` account
+/// uses the testnet store, any other account the mainnet store.
+pub fn nft_base_uri() -> &'static str {
+    if env::current_account_id().as_str().ends_with(".testnet") {
+        "https://testnet.builddeed.dev/nft"
+    } else {
+        "https://builddeed.dev/nft"
+    }
+}
 
 // The order of the variants is part of the stored state. Do not change it.
 #[derive(BorshStorageKey)]
@@ -1356,14 +1363,14 @@ impl NonFungibleTokenEnumeration for Contract {
 impl NonFungibleTokenMetadataProvider for Contract {
     fn nft_metadata(&self) -> NFTContractMetadata {
         let mut m = self.metadata.get().expect("set in new");
-        m.base_uri = Some(NFT_BASE_URI.to_string());
+        m.base_uri = Some(nft_base_uri().to_string());
         m
     }
 }
 
-/// The image of a license: one PNG per product, under [`NFT_BASE_URI`].
+/// The image of a license: one PNG per product, under [`nft_base_uri`].
 fn media_of(token_id: &str) -> String {
-    format!("{NFT_BASE_URI}/{}.png", product_of(token_id))
+    format!("{}/{}.png", nft_base_uri(), product_of(token_id))
 }
 
 /// Every license shows its product's image as a full URL: some wallets do
