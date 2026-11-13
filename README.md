@@ -15,7 +15,7 @@ It runs Doom: the store sells two programs that use it today,
 - Programs: BuildDeed Checksum in this repository ([releases](https://github.com/13rac1/builddeed/releases/latest)), Room4Doom at [ai-13rac1/room4doom](https://github.com/ai-13rac1/room4doom) ([releases](https://github.com/ai-13rac1/room4doom/releases/latest))
 - SDK for developers (Rust and Go): [13rac1/builddeed-sdk](https://github.com/13rac1/builddeed-sdk)
 - For AI agents: [agents.md](https://testnet.builddeed.dev/agents.md) (buy, register and download with the `builddeed` CLI)
-- Built at NEAR HACKATHON 2026, track `nfts` ("NFTs That Do Something").
+- Built at NEAR HACKATHON 2026, tracks `nfts` ("NFTs That Do Something") and `agents` ("Agent Economy").
 
 ## The problem
 
@@ -247,6 +247,10 @@ The contract on `licenses.builddeed.testnet` has the code hash
   hex (app); @hot-labs/near-connect, Vite (site). The full lists are in
   `contract/Cargo.lock`, `app/Cargo.lock` and `site/package-lock.json`.
 - No template was used.
+- Other project: the BuildDeed developer is also on the team of a separate,
+  independent NEAR HACKATHON 2026 project,
+  [private-hermes-agent](https://github.com/mikeperry-tor/private-hermes-agent).
+  The two projects share no code.
 
 ## License
 
