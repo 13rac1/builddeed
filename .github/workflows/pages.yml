@@ -1,5 +1,5 @@
 # Builds the website in site/ and publishes it with GitHub Pages at
-# https://builddeed.dev (the custom domain is set in the repository settings).
+# https://testnet.builddeed.dev (the custom domain is set in the repository settings).
 name: Pages
 
 on:

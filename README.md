@@ -7,14 +7,14 @@ developers and contributors. A license gives its owner the verified official
 build of a program. Anyone can read the code and build it.
 
 It runs Doom: the store sells two programs that use it today,
-[Room4Doom](https://builddeed.dev/p/doom/) (a Doom engine with Freedoom) and
-[BuildDeed Checksum](https://builddeed.dev/p/checksum/) (a desktop tool).
+[Room4Doom](https://testnet.builddeed.dev/p/doom/) (a Doom engine with Freedoom) and
+[BuildDeed Checksum](https://testnet.builddeed.dev/p/checksum/) (a desktop tool).
 
-- Store (NEAR testnet): https://builddeed.dev/ (developers: https://builddeed.dev/developers/)
+- Store (NEAR testnet): https://testnet.builddeed.dev/ (developers: https://testnet.builddeed.dev/developers/)
 - License contract: [`licenses.builddeed.testnet`](https://testnet.nearblocks.io/address/licenses.builddeed.testnet): one contract and one NFT collection for every product
 - Programs: BuildDeed Checksum in this repository ([releases](https://github.com/13rac1/builddeed/releases/latest)), Room4Doom at [ai-13rac1/room4doom](https://github.com/ai-13rac1/room4doom) ([releases](https://github.com/ai-13rac1/room4doom/releases/latest))
 - SDK for developers (Rust and Go): [13rac1/builddeed-sdk](https://github.com/13rac1/builddeed-sdk)
-- For AI agents: [agents.md](https://builddeed.dev/agents.md) (buy, register and download with the `builddeed` CLI)
+- For AI agents: [agents.md](https://testnet.builddeed.dev/agents.md) (buy, register and download with the `builddeed` CLI)
 - Built at NEAR HACKATHON 2026, track `nfts` ("NFTs That Do Something").
 
 ## The problem
@@ -65,11 +65,11 @@ Three ways to try it, from fastest to fullest:
   extract it and run `room4doom`. You see the Freedoom title screen with the
   license box: "Unregistered shareware copy". E1M1 plays (left click fires).
   Start a new game in episode 2: you see "Register this computer to play
-  this map." Buy a license on https://builddeed.dev/p/doom/ (1 testnet
+  this map." Buy a license on https://testnet.builddeed.dev/p/doom/ (1 testnet
   NEAR), press R in the game, and register the computer on the page that
   opens: within a few seconds the box shows "Registered to <your account>",
   and every map is open.
-- **An AI agent buys (no browser).** Follow [agents.md](https://builddeed.dev/agents.md):
+- **An AI agent buys (no browser).** Follow [agents.md](https://testnet.builddeed.dev/agents.md):
   the owner deposits a budget with a highest price, gives the agent a
   function-call key, and the agent runs `builddeed buy`, `register` and
   `download`. You see the license, the seat and a checked download as JSON.
@@ -144,7 +144,7 @@ The hackathon release has no Apple or Windows code signature.
 
 | Part | NEAR feature |
 | --- | --- |
-| License | NEP-171 NFT with NEP-177 metadata and NEP-181 enumeration. Each sale logs the NEP-171 `nft_mint` event, so wallets such as Meteor show the license. The token metadata holds the update period, and each license shows its product's image (`https://builddeed.dev/nft/<product>.png`). |
+| License | NEP-171 NFT with NEP-177 metadata and NEP-181 enumeration. Each sale logs the NEP-171 `nft_mint` event, so wallets such as Meteor show the license. The token metadata holds the update period, and each license shows its product's image (`https://testnet.builddeed.dev/nft/<product>.png`). |
 | Payment split | The contract pays the payees with transfers in the `buy`, `renew` and `buy_listed` calls. |
 | Resale market and royalty | `list`, `delist` (1 yoctoNEAR, so that only a full-access key can call them), `buy_listed` with the price that the buyer saw. `nft_transfer` is refused. |
 | Products | One contract holds every product. A developer calls `add_product` with the key, name, prices, update period, royalty, payees and seats per license, and pays only for the storage of the record. A self-service product key is `<name>.<developer account>`, so nobody can take a name in another account. Token ids are `<product>:<number>`, for example `doom:1`. |

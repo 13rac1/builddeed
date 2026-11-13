@@ -2,8 +2,8 @@
 
 > Software licenses as NFTs on NEAR testnet. One contract, licenses.builddeed.testnet, holds every license of every product and the SHA-256 of each official build. An agent can buy a license, register the computer it runs on, and download a checked build with no browser, paid from a budget that the owner sets for 1 to 16 products.
 
-- [Guide for agents](https://builddeed.dev/agents.md): the views, buy_from_budget (with the price from get_product) and add_device_from_budget, the owner's budget and key, the builddeed CLI, seats, retries, and what the download check proves.
-- [Store](https://builddeed.dev/): each product has a page at https://builddeed.dev/p/<key>/ with its price and terms in the HTML. [Sitemap](https://builddeed.dev/sitemap.xml).
+- [Guide for agents](https://testnet.builddeed.dev/agents.md): the views, buy_from_budget (with the price from get_product) and add_device_from_budget, the owner's budget and key, the builddeed CLI, seats, retries, and what the download check proves.
+- [Store](https://testnet.builddeed.dev/): each product has a page at https://testnet.builddeed.dev/p/<key>/ with its price and terms in the HTML. [Sitemap](https://testnet.builddeed.dev/sitemap.xml).
 - [Protocol spec](https://github.com/13rac1/builddeed-sdk/blob/main/spec/README.md): the computer id, the license check, build records, and agents with no browser.
 - [Contract source](https://github.com/13rac1/builddeed/blob/main/contract/src/lib.rs): the methods and their JSON.
 

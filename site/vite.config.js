@@ -27,7 +27,7 @@ const productInputs = writeProductPages(products, root);
 
 export default defineConfig({
   // Absolute paths: 404.html is served at any missing path, so its assets
-  // and links cannot be relative. The site is at the root of builddeed.dev.
+  // and links cannot be relative. The site is at the root of testnet.builddeed.dev.
   base: "/",
   plugins: [
     {

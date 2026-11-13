@@ -2,7 +2,7 @@
 // (vite.config.js) both use. No browser API here: Node imports this file.
 
 /** The address of the website. Absolute URLs (OG tags, sitemap) use it. */
-export const SITE = "https://builddeed.dev";
+export const SITE = "https://testnet.builddeed.dev";
 export const NETWORK = "testnet";
 /** The official BuildDeed collection. Each license of each product is a
  * token of this one contract. */
