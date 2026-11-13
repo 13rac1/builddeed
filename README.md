@@ -178,7 +178,7 @@ You need Podman.
 
 ```sh
 scripts/check.sh             # everything below, with rustfmt and clippy
-scripts/contract.sh test     # contract: 122 unit tests and the sandbox test
+scripts/contract.sh test     # contract: 123 unit tests and the sandbox test
 scripts/app.sh test          # app: 4 tests (seat check against a local fake RPC)
 scripts/app.sh linux         # app/target/x86_64-unknown-linux-gnu/release/builddeed-checksum
 scripts/app.sh windows       # app/target/x86_64-pc-windows-gnu/release/builddeed-checksum.exe
@@ -190,7 +190,7 @@ The website: `cd site && npm ci && npm run build` (Node 24).
 ### Deployed contract
 
 The contract on `licenses.builddeed.testnet` has the code hash
-`ee9dcf6665596a4dc63a6c6ca131fa52d89790b4020390bdb8e28728c5d89869`.
+`d8f4eaca68aa33392bd1164dac616663d9dc727702b94b4d4d8b27162403df1d`.
 `scripts/contract.sh build` prints the same SHA-256.
 
 ## Trust model and limits
