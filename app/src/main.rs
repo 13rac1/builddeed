@@ -43,7 +43,7 @@ const PRODUCT: &str = "BuildDeed Checksum";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const CONTRACT: &str = builddeed::OFFICIAL_TESTNET_CONTRACT;
 const PRODUCT_KEY: &str = "checksum";
-const SITE_URL: &str = "https://builddeed.dev";
+const SITE_URL: &str = "https://testnet.builddeed.dev";
 const EXPLORER: &str = "https://testnet.nearblocks.io/address";
 /// Earlier versions kept the last license check in this file for offline
 /// use. The app no longer reads it, and removes it.
